@@ -1,0 +1,22 @@
+Agent Orchestration  & Federative Learning
+
+Project: Build an agent-based federative learning system that can be used assess a scientists analysis. The output presentation is without data centralisation (from adjacent biobanks). 
+
+Core questions:
+How data is located and localised from multiple sources?
+What does the data output look like with segmentation completed by a federated agent?
+
+Workflow ideas:
+
+Global server prompted by user task -> root request to the clients with data to support the task -> local agent observes the task -> global agent can observe the encapsulated data now too -> knowledge annotations prompt response to server 
+
+A for-loop can be used to re-prompt the user to enter for more input information if the local sourcing to global agent output is unclear.
+
+Prompt response -> server-agent segmentation (validation codes for local client data validation) -> global server agent will describe the data contract -> if success -> local agent conferred and validates data through folds -> server agent can begin coding now on the local data
+
+Input: To Begin Task In 
+Processing: Data Function/Algorithm that standardises and cleans data for the global model
+Output: End Analysis Results/Descriptions Out
+
+Feeback after Workflow presentation:
+Algorithms do not need to be complicated. Fx XGBoost, RandomForest.
