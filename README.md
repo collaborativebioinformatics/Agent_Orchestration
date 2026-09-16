@@ -2,14 +2,20 @@
 
 ## Federated biobank workflow
 
-This design targets privacy-preserving, agentic analysis across federated biobanks. A researcher defines the scientific question and approves the available tools. The server agent then orchestrates the work, contracts each site-specific task, and analyzes the returned aggregates. Within each biobank boundary, a site agent discovers eligible data, harmonizes it, and runs only user-approved analysis tools. Patient-level records never leave their source biobank, and sites do not communicate directly with one another.
+This design illustrates privacy-preserving, agentic analysis across federated biobanks. It separates central coordination from local data access so that multiple institutions can contribute to a shared analysis without exchanging patient-level records.
 
 ![Agentic data analysis across federated biobanks](assets/biobank-agentic-workflow.png)
 
-### Initial prompt
+### How the workflow operates
 
-> A workflow chart for an agentic data analysis workflow for a biobank task, similar to what we have in [this reference design](https://claude.ai/design/p/9888c087-a639-48eb-b042-e859507cc22a?via=share). The server agent will orchestrate, contract, and analyze the returned analysis results, while the site agent will do data discovery, data harmonization, and perform analysis with particular tools validated and approved by the user.
+1. **Researcher approval:** The researcher poses a scientific question and selects the tools and algorithms that may be used. This approved registry becomes an allowlist that travels with the analysis contract.
+2. **Server orchestration:** The server agent identifies eligible biobanks, decomposes the question into site-level tasks, and fixes the statistical design before execution begins.
+3. **Analysis contract:** Each site receives a signed specification covering the cohort definition, variables, model, output granularity, disclosure rules, and approved tools.
+4. **Local data preparation:** Behind each biobank's firewall, a site agent discovers eligible records and harmonizes local schemas, units, and coding systems to the agreed data model.
+5. **Local analysis:** The site agent runs only allowlisted tools and applies disclosure controls before releasing any output.
+6. **Aggregate analysis:** The server agent pools the returned coefficients, standard errors, counts, and other permitted aggregates; performs meta-analysis and cross-site quality checks; and drafts findings with provenance.
+7. **Human review and refinement:** Results return to the researcher for review. Quality issues or heterogeneous results can trigger a feedback loop in which the server agent refines the design and issues a new contract.
 
-### Figure description
+### Trust and data boundaries
 
-The chart is a 1660×1320 artboard: researcher and approved-tool registry on top; **server agent** (orchestrate → contract → analyze returns, with a re-contract feedback loop); three **site agents** (discovery → harmonization → analysis with allowlisted tools); and the biobanks they sit in front of. Solid green arrows show tasks and contracts travelling down, dashed arrows show aggregates only coming back up, and no-cross-site markers reinforce the separation between biobanks.
+Solid green arrows represent tasks, contracts, and approved tools travelling from the coordinator to each site. Dashed arrows represent aggregate-only results returning to the server. Patient-level records remain inside their source biobank, and biobanks never communicate directly with one another.
