@@ -1,5 +1,14 @@
 # Agent Orchestration
 
+## Team
+- Cecile
+- Ziyue
+- Maya
+- Harris
+- Aryaman
+- Rajarshi
+- Rabindra
+
 ## Federated biobank workflow
 
 This design illustrates privacy-preserving, agentic analysis across federated biobanks. It separates central coordination from local data access so that multiple institutions can contribute to a shared analysis without exchanging patient-level records.
