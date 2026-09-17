@@ -2,7 +2,7 @@
 
 ## How to Use
 
-Enter your question. Agent Genie will interpret your question, parse the the available biobanks and propose an analysis. The agent will use the metadata to output suitable statistical analyses for review. 
+Enter your question. The agent performs best when primed with specific input (the groups you want to compare, the variable, the desired outcome, and sub-questions). Agent Genie will interpret your question, parse the the available biobanks and propose an analysis. The agent will use the metadata to output suitable statistical analyses for review. 
 
 ![User Interface](assets/UI.png)
 
