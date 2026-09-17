@@ -31,6 +31,8 @@ Solid green arrows represent tasks, contracts, and approved tools travelling fro
 
 Each local server node performs quality control and model fitting while the global server agent collects site results. Summary statistics are displayed on the UI and patient data is never revealed.
 
+The runnable federated-analysis implementation developed here is packaged in [`AgentGenie/`](AgentGenie/README.md).
+
 ## Team
 - Cecile
 - Ziyue

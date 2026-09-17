@@ -1,0 +1,85 @@
+{
+  "schema_version": "biobank.analysis_contract.v2",
+  "study_id": "tnbc-multisite-demo",
+  "question": "Compare TNBC and non-TNBC patients by age and menopause; describe TNBC overall survival by surgery and treatment; summarize selected gene expression. Also assess weight, ethnicity, and progression-free survival if supported.",
+  "training_allowed": false,
+  "cohort_definition": "TNBC = ER negative AND PR negative AND HER2 negative; comparator = all other records",
+  "cohorts": [
+    {
+      "name": "TNBC",
+      "predicate": {
+        "all": [
+          {"eq_ci": {"field": "receptor_er", "value": "Negative"}},
+          {"eq_ci": {"field": "receptor_pr", "value": "Negative"}},
+          {"eq_ci": {"field": "receptor_her2", "value": "Negative"}}
+        ]
+      }
+    },
+    {
+      "name": "non-TNBC",
+      "predicate": {
+        "not": {
+          "all": [
+            {"eq_ci": {"field": "receptor_er", "value": "Negative"}},
+            {"eq_ci": {"field": "receptor_pr", "value": "Negative"}},
+            {"eq_ci": {"field": "receptor_her2", "value": "Negative"}}
+          ]
+        }
+      }
+    }
+  ],
+  "site_harmonization": {
+    "site_a_university_hospital": {
+      "fields": {
+        "receptor_er": {"source": "er_status"},
+        "receptor_pr": {"source": "pr_status"},
+        "receptor_her2": {"source": "her2_status"},
+        "os_time_months": {"source": "overall_survival_months", "multiply": 1},
+        "os_event": {"source": "overall_survival", "value_map": {"0": "event", "1": "censored"}}
+      }
+    },
+    "site_b_cancer_centre": {
+      "fields": {
+        "receptor_er": {"source": "er_status"},
+        "receptor_pr": {"source": "pr_status"},
+        "receptor_her2": {"source": "her2_status"},
+        "os_time_months": {"source": "overall_survival_years", "multiply": 12},
+        "os_event": {"source": "overall_survival", "value_map": {"0": "event", "1": "censored"}}
+      }
+    },
+    "site_c_regional_hospital": {
+      "fields": {
+        "receptor_er": {"source": "er_status", "value_map": {"0": "Negative", "1": "Positive"}},
+        "receptor_pr": {"source": "pr_status"},
+        "receptor_her2": {"source": "her2_status"},
+        "os_time_months": {"source": "overall_survival_months", "multiply": 1},
+        "os_event": {"source": "overall_survival", "value_map": {"0": "event", "1": "censored"}}
+      }
+    }
+  },
+  "approved_tools": [
+    "federated_histogram",
+    "categorical_contingency",
+    "federated_kaplan_meier",
+    "numeric_sufficient_statistics"
+  ],
+  "privacy": {
+    "min_cell_count": 10,
+    "forbidden_outputs": ["row_level", "patient_ids", "exact_min_max"]
+  },
+  "analyses": [
+    {"analysis_id": "age_by_cohort", "tool": "federated_histogram", "field": "age_at_diagnosis", "cohorts": ["TNBC", "non-TNBC"], "bins": [20, 30, 40, 50, 60, 70, 80, 90, 110]},
+    {"analysis_id": "menopause_by_cohort", "tool": "categorical_contingency", "field": "inferred_menopausal_state", "cohorts": ["TNBC", "non-TNBC"]},
+    {"analysis_id": "os_by_surgery", "tool": "federated_kaplan_meier", "time_field": "os_time_months", "event": {"field": "os_event", "values": ["event"]}, "group_by": "type_of_breast_surgery", "subset_cohort": "TNBC", "time_bins": [0, 12, 24, 36, 48, 60, 84, 120, 180, 240, 360]},
+    {"analysis_id": "os_by_chemotherapy", "tool": "federated_kaplan_meier", "time_field": "os_time_months", "event": {"field": "os_event", "values": ["event"]}, "group_by": "chemotherapy", "subset_cohort": "TNBC", "time_bins": [0, 12, 24, 36, 48, 60, 84, 120, 180, 240, 360]},
+    {"analysis_id": "os_by_hormone_therapy", "tool": "federated_kaplan_meier", "time_field": "os_time_months", "event": {"field": "os_event", "values": ["event"]}, "group_by": "hormone_therapy", "subset_cohort": "TNBC", "time_bins": [0, 12, 24, 36, 48, 60, 84, 120, 180, 240, 360]},
+    {"analysis_id": "os_by_radiotherapy", "tool": "federated_kaplan_meier", "time_field": "os_time_months", "event": {"field": "os_event", "values": ["event"]}, "group_by": "radio_therapy", "subset_cohort": "TNBC", "time_bins": [0, 12, 24, 36, 48, 60, 84, 120, 180, 240, 360]},
+    {"analysis_id": "selected_gene_expression", "tool": "numeric_sufficient_statistics", "fields": ["brca1", "brca2", "tp53", "erbb2"], "cohorts": ["TNBC", "non-TNBC"]}
+  ],
+  "unavailable_requests": [
+    {"concept": "weight", "reason": "No site schema contains a weight field."},
+    {"concept": "ethnicity/race", "reason": "No site schema contains ethnicity or race; it must not be inferred."},
+    {"concept": "progression-free survival", "reason": "The sites contain overall survival but no progression/recurrence time and event pair."}
+  ],
+  "approval": {"status": "proposed"}
+}
