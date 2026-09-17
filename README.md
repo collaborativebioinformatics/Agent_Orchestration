@@ -1,13 +1,5 @@
 # Agent Orchestration
 
-## Team
-- Cecile
-- Ziyue
-- Maya
-- Harris
-- Aryaman
-- Rajarshi
-- Rabindra
 
 ## Federated biobank workflow
 
@@ -28,3 +20,16 @@ This design illustrates privacy-preserving, agentic analysis across federated bi
 ### Trust and data boundaries
 
 Solid green arrows represent tasks, contracts, and approved tools travelling from the coordinator to each site. Dashed arrows represent aggregate-only results returning to the server. Patient-level records remain inside their source biobank, and biobanks never communicate directly with one another.
+
+![Communication between global server and local server nodes](assets/federated_cox_server_site_orchestration.png)
+
+Each local server node performs quality control and model fitting while the global server agent collects site results so the summary statistics 
+
+## Team
+- Cecile
+- Ziyue
+- Maya
+- Harris
+- Aryaman
+- Rajarshi
+- Rabindra
