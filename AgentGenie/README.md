@@ -246,17 +246,3 @@ visibly labelled as a recorded replay. The demonstration includes the initial
 question, client feasibility review, researcher-supplied revision guidance, a
 supported second pass, human approval, disclosure-controlled feasible-case
 reporting, and the final Kaplan–Meier curve.
-
-To reproduce the recording while the local study UI is running:
-
-```bash
-python scripts/record_demo.py \
-  --sites-root /path/to/sites \
-  --output-dir demo-video
-```
-
-The replay serves result artifacts from its pinned source run, so the final
-curve does not depend on whichever live study session is active. It displays
-`Minimal` for site-level exclusions whose exact counts would violate the
-approved minimum-cell privacy rule, while retaining the exact pooled feasible
-count.
