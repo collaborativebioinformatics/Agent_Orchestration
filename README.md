@@ -25,7 +25,7 @@ Solid green arrows represent tasks, contracts, and approved tools travelling fro
 
 ![Communication between global server and local server nodes](assets/federated_cox_server_site_orchestration.png)
 
-Each local server node performs quality control and model fitting while the global server agent collects site results so the summary statistics 
+Each local server node performs quality control and model fitting while the global server agent collects site results. Summary statistics are displayed on the UI and patient data is never revealed.
 
 ## Team
 - Cecile
