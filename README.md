@@ -1,5 +1,7 @@
 # Agent Orchestration
 
+![User Interface](assets/UI.png)
+
 
 ## Federated biobank workflow
 
