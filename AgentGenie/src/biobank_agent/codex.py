@@ -51,8 +51,9 @@ object. For federated_kaplan_meier this means top-level time_field, event, group
 time_bins, and optional subset_cohort. For missingness_summary, fields is top-level.
 Every cohort predicate must contain a real non-empty predicate; never emit all: [].
 Use the exact complete field specifications proposed by each client data adapter,
-including source, multiply, and value_map. Do not add pseudo value-map keys such as
-__MISSING__ or __OTHER_NON_MISSING__. Preserve all privacy and scientific caveats.
+including source, multiply, and value_map. Preserve the verified
+__OTHER_NON_MISSING__ default when a client proposed it; missing values remain missing
+without an explicit __MISSING__ entry. Preserve all privacy and scientific caveats.
 """
 
     def synthesize_human_review(
@@ -95,6 +96,10 @@ legacy catalog allowed_tools field omits it. If action is approve, leave
 full_revision_guidance empty and summarize the exact endpoint, population, tools,
 harmonization assumptions, and privacy policy being approved.
 
+When every site reports all_requested_analyses_supported=true, recommend approve. Do
+not request another revision for assumptions already incorporated into the proposed
+contract and verified client adapters.
+
 Do not ask the researcher to supply source encodings, category vocabularies, or other
 technical metadata that the client agents explicitly reported as unavailable. When the
 requested endpoint is unavailable but every client proposes the same scientifically
@@ -107,6 +112,22 @@ labels, and common tool parameters when those operations are supported by the cl
 proposals.
 """
         value = self.run_json(prompt, work_dir)
+        sites = feasibility.get("sites", [])
+        all_sites_support_contract = bool(sites) and all(
+            site.get("all_requested_analyses_supported") is True for site in sites
+        )
+        if contract.payload.get("analyses") and all_sites_support_contract:
+            value["action"] = "approve"
+            value["summary"] = (
+                "All participating sites support the proposed analyses and their verified local adapters match "
+                "the server contract. Confirm the analysis contract before execution."
+            )
+            value["confirmation_items"] = [
+                "Confirm the displayed endpoint, cohorts, and requested analyses.",
+                "Confirm the displayed site-specific harmonization and shared tool parameters.",
+                "Confirm the minimum-cell and aggregate-only privacy controls.",
+            ]
+            value["full_revision_guidance"] = ""
         if value.get("schema_version") != "biobank.server_agent_review.v1":
             raise ValueError("Unsupported server-agent review schema")
         if value.get("action") not in {"approve", "revise"}:

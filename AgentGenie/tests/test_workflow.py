@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -8,13 +9,13 @@ import pytest
 
 from biobank_agent.aggregate import aggregate_site_results
 from biobank_agent.contracts import AnalysisContract
-from biobank_agent.feasibility import assess_feasibility
+from biobank_agent.feasibility import assess_feasibility, promote_verified_site_adapters
 from biobank_agent.flare.approval import ApprovalRejected, HumanApprovalGate, create_human_decision
 from biobank_agent.site import SiteExecutor
 from biobank_agent.site_agent import CodexSiteAgent
 from biobank_agent.tools.harmonize import harmonize
 from biobank_agent.tools.local import survival_histograms
-from biobank_agent.ui.server import StudyConsoleStore
+from biobank_agent.ui.server import HTML, StudyConsoleStore
 
 
 def _contract(approved: bool) -> AnalysisContract:
@@ -150,6 +151,77 @@ def test_kaplan_meier_matches_integer_event_contract_to_float_data() -> None:
     assert result["groups"]["a"]["censored"] == [1, 1]
 
 
+def test_kaplan_meier_excludes_missing_event_group_and_invalid_time() -> None:
+    data = pd.DataFrame(
+        {
+            "time": [3.0, 8.0, -1.0, 14.0, 16.0],
+            "event": [1.0, None, 0.0, 0.0, 1.0],
+            "group": ["a", "a", "a", None, "a"],
+        }
+    )
+
+    result = survival_histograms(
+        data,
+        {"all": pd.Series(True, index=data.index)},
+        {
+            "time_field": "time",
+            "event": {"field": "event", "values": [1]},
+            "group_by": "group",
+            "subset_cohort": "all",
+            "time_bins": [0, 12, 24],
+        },
+        min_cell=1,
+    )
+
+    assert result["groups"]["a"]["n"] == 2
+    assert result["groups"]["a"]["events"] == [1, 1]
+    assert result["groups"]["a"]["censored"] == [0, 0]
+
+
+def test_site_reports_kaplan_meier_complete_case_rows_without_subset_cohort(tmp_path: Path) -> None:
+    site = tmp_path / "site_one"
+    site.mkdir()
+    pd.DataFrame(
+        {
+            "time": [3.0, 8.0, -1.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0],
+            "event": [1.0, None, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, None, 0.0],
+            "group": ["a", "a", "a", None, "a", "a", "a", "a", "a", None],
+        }
+    ).to_csv(site / "data.csv", index=False)
+    (site / "catalog.json").write_text(json.dumps({"site_id": "site_one"}), encoding="utf-8")
+    payload = {
+        "schema_version": "biobank.analysis_contract.v2",
+        "study_id": "row-count-test",
+        "question": "Compare survival",
+        "training_allowed": False,
+        "cohort_definition": "All records with a group value",
+        "cohorts": [{"name": "all", "predicate": {"not": {"is_missing": {"field": "group"}}}}],
+        "site_harmonization": {},
+        "approved_tools": ["federated_kaplan_meier"],
+        "privacy": {"min_cell_count": 5, "forbidden_outputs": ["row_level"]},
+        "analyses": [
+            {
+                "analysis_id": "survival",
+                "tool": "federated_kaplan_meier",
+                "cohorts": ["all"],
+                "time_field": "time",
+                "event": {"field": "event", "values": [1]},
+                "group_by": "group",
+                "time_bins": [0, 12, 24],
+            }
+        ],
+        "approval": {"status": "proposed"},
+    }
+    proposed = AnalysisContract.parse(payload)
+    payload["approval"] = {"status": "approved", "contract_digest": proposed.approval_digest}
+
+    result = SiteExecutor(site).execute(AnalysisContract.parse(payload))
+
+    assert result["analysis_row_counts"]["survival"]["rows_used"] == 5
+    assert result["analysis_row_counts"]["survival"]["selection"].startswith("complete cases")
+    assert result["row_exclusion_reason"].startswith("5 local rows were excluded")
+
+
 def test_edit_after_approval_invalidates_it() -> None:
     contract = _contract(approved=True)
     assert contract.is_approved
@@ -228,6 +300,31 @@ def test_feasibility_exposes_client_agent_proposal_for_human_review() -> None:
     assert site["client_agent_proposal"]["analysis_proposals"][0]["tool"] == "federated_histogram"
 
 
+def test_server_promotes_ready_verified_site_adapter_before_human_review() -> None:
+    proposal = _contract(approved=False)
+    catalog = {
+        "site_id": "site_one",
+        "site_agent_assessment": {
+            "data_adapter": {
+                "status": "ready",
+                "unresolved": [],
+                "fields": {
+                    "canonical_group": {
+                        "source": "local_group",
+                        "multiply": 1.0,
+                        "value_map": {"__OTHER_NON_MISSING__": "other"},
+                    }
+                },
+            }
+        },
+    }
+
+    reconciled = promote_verified_site_adapters(proposal, [catalog])
+
+    mapping = reconciled.payload["site_harmonization"]["site_one"]["fields"]["canonical_group"]
+    assert mapping["value_map"] == {"__OTHER_NON_MISSING__": "other"}
+
+
 def test_ui_handles_question_and_approval_without_bypassing_controller(tmp_path: Path) -> None:
     store = StudyConsoleStore(tmp_path)
     store.gate.set_state("WAITING_FOR_QUESTION")
@@ -239,6 +336,39 @@ def test_ui_handles_question_and_approval_without_bypassing_controller(tmp_path:
     decision = store.decide("approve", "researcher", "APPROVE", None)
     assert decision["proposal_digest"] == proposal.approval_digest
     assert not store.gate.approved_contract_path.exists()
+
+
+def test_ui_appends_manual_guidance_to_digest_bound_revision(tmp_path: Path) -> None:
+    store = StudyConsoleStore(tmp_path)
+    store.gate.set_state("WAITING_FOR_QUESTION")
+    store.submit_question("Compare survival", "Cecilie", True)
+    proposal = _contract(approved=False)
+    server_guidance = "Use a common endpoint and shared time bins."
+    digest = hashlib.sha256(server_guidance.encode()).hexdigest()
+    store.gate.publish(
+        proposal,
+        {
+            "schema_version": "biobank.feasibility_report.v2",
+            "sites": [],
+            "server_agent_review": {
+                "schema_version": "biobank.server_agent_review.v1",
+                "action": "revise",
+                "summary": "Revision is required.",
+                "confirmation_items": ["Confirm endpoint."],
+                "full_revision_guidance": server_guidance,
+                "revision_digest": digest,
+            },
+        },
+    )
+
+    store.revise_proposal(digest, "Cecilie", "Exclude negative follow-up times.")
+
+    restart = json.loads(store.gate.new_question_path.read_text())
+    next_request = restart["next_request"]
+    assert next_request["revision_guidance"] == server_guidance
+    assert next_request["manual_revision_guidance"] == "Exclude negative follow-up times."
+    assert "Additional guidance supplied by the researcher" in next_request["question"]
+    assert "Exclude negative follow-up times." in next_request["question"]
 
 
 def test_completed_ui_exposes_final_result_and_disclosure_controlled_row_summary(tmp_path: Path) -> None:
@@ -267,6 +397,53 @@ def test_completed_ui_exposes_final_result_and_disclosure_controlled_row_summary
     assert result["artifacts"] == ["survival.svg"]
     assert result["aggregate"]["site_row_summaries"][0]["analysis_row_counts"]["survival"]["rows_used"] == 20
     assert store.result_artifact("report", "survival.svg").name == "survival.svg"
+
+
+def test_ui_reopens_persisted_active_session_after_restart(tmp_path: Path) -> None:
+    old_run = tmp_path / "completed-session"
+    active_run = tmp_path / "new-session"
+    HumanApprovalGate(old_run).set_state("COMPLETED")
+    HumanApprovalGate(active_run).set_state("WAITING_FOR_APPROVAL")
+    HumanApprovalGate._write(
+        tmp_path / ".active_session.json",
+        {
+            "schema_version": StudyConsoleStore.ACTIVE_SESSION_SCHEMA,
+            "session_id": active_run.name,
+        },
+    )
+
+    restarted = StudyConsoleStore(old_run, output_root=tmp_path)
+
+    snapshot = restarted.snapshot()
+    assert restarted.gate.run_dir == active_run.resolve()
+    assert snapshot["session_id"] == "new-session"
+    assert snapshot["state"]["status"] == "WAITING_FOR_APPROVAL"
+
+
+def test_ui_ignores_active_session_pointer_outside_output_root(tmp_path: Path) -> None:
+    fallback = tmp_path / "fallback"
+    HumanApprovalGate(fallback).set_state("WAITING_FOR_QUESTION")
+    HumanApprovalGate._write(
+        tmp_path / ".active_session.json",
+        {
+            "schema_version": StudyConsoleStore.ACTIVE_SESSION_SCHEMA,
+            "session_id": "../outside",
+        },
+    )
+
+    restarted = StudyConsoleStore(fallback, output_root=tmp_path)
+
+    assert restarted.gate.run_dir == fallback.resolve()
+
+
+def test_ui_uses_live_agent_graph_and_places_completed_action_in_sidebar() -> None:
+    assert 'id="execution-card"' in HTML
+    assert 'id="agent-graph"' in HTML
+    assert 'id="timeline-card"' not in HTML
+    clients = HTML.index('id="clients-card"')
+    action = HTML.index('id="completed-actions"')
+    sidebar_end = HTML.index("</aside>", clients)
+    assert clients < action < sidebar_end
 
 
 def test_site_agent_retries_adapter_that_uses_a_derived_field_as_source() -> None:
@@ -304,6 +481,32 @@ def test_site_agent_retries_adapter_that_uses_a_derived_field_as_source() -> Non
     assert "absolute source field allowlist" in planner.prompts[1]
     assert result["data_adapter"]["fields"]["time_months"]["source"] == "overall_survival_years"
     assert result["data_adapter"]["digest"]
+
+
+def test_site_agent_canonicalizes_default_nonmissing_value_map_sentinel() -> None:
+    result = {
+        "schema_version": "biobank.site_agent_assessment.v1",
+        "site_id": "site_one",
+        "data_adapter": {
+            "schema_version": "biobank.declarative_data_adapter.v1",
+            "status": "ready",
+            "fields": {
+                "event": {
+                    "source": "status",
+                    "value_map": {"Died": 1, "__OTHER_NONMISSING__": 0, "__MISSING__": None},
+                }
+            },
+            "unresolved": [],
+        },
+        "analysis_proposals": [],
+    }
+
+    CodexSiteAgent._validate(result, {"site_id": "site_one", "schema_fields": ["status"]})
+
+    assert result["data_adapter"]["fields"]["event"]["value_map"] == {
+        "Died": 1,
+        "__OTHER_NON_MISSING__": 0,
+    }
 
 
 def test_site_agent_returns_incomplete_assessment_after_two_invalid_adapters() -> None:

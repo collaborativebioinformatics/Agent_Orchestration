@@ -235,3 +235,26 @@ recipe, clients = build_biobank_recipe(
 Install against an NVFlare 2.9 environment with `pip install -e '.[nvflare]'`.
 The Controller, client Executor, approval state machine, and job builder are in
 `src/biobank_agent/flare/`.
+
+### Timing-compressed workflow demo
+
+The [AgentGenie workflow video](demo-video/agentgenie-workflow-demo-clean-final.webm)
+replays a real analysis contract and aggregate result with compressed agent wait
+times. It is visibly labelled as a recorded replay. The demonstration includes
+the initial question, client feasibility review, researcher-supplied revision
+guidance, a supported second pass, human approval, disclosure-controlled
+feasible-case reporting, and the final Kaplan–Meier curve.
+
+To reproduce the recording while the local study UI is running:
+
+```bash
+python scripts/record_demo.py \
+  --sites-root /path/to/sites \
+  --output-dir demo-video
+```
+
+The replay serves result artifacts from its pinned source run, so the final
+curve does not depend on whichever live study session is active. It displays
+`Minimal` for site-level exclusions whose exact counts would violate the
+approved minimum-cell privacy rule, while retaining the exact pooled feasible
+count.

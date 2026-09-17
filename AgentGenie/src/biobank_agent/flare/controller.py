@@ -9,7 +9,7 @@ from typing import Any
 from biobank_agent.aggregate import aggregate_site_results
 from biobank_agent.codex import CodexPlanner
 from biobank_agent.contracts import AnalysisContract
-from biobank_agent.feasibility import assess_feasibility
+from biobank_agent.feasibility import assess_feasibility, promote_verified_site_adapters
 from biobank_agent.flare import ANALYSIS_TASK, CATALOG_TASK, PROGRESS_TOPIC
 from biobank_agent.flare.approval import ApprovalExpired, ApprovalRejected, HumanApprovalGate
 from biobank_agent.flare.executor import PAYLOAD_KEY
@@ -129,6 +129,7 @@ class BiobankAnalysisController(Controller):
         )
         try:
             proposal = self._create_proposal(question, catalogs, run_dir)
+            proposal = promote_verified_site_adapters(proposal, catalogs)
             feasibility = assess_feasibility(proposal, catalogs)
             gate.record_event(
                 "review_synthesis",

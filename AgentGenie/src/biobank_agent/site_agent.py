@@ -144,6 +144,17 @@ Use empty arrays or objects when needed. Never invent a source field or tool nam
         proposals = adapter.get("fields", {})
         if not isinstance(proposals, dict):
             raise ValueError("data_adapter.fields must be an object")
+        for specification in proposals.values():
+            if not isinstance(specification, dict) or not isinstance(specification.get("value_map"), dict):
+                continue
+            normalized_map = {}
+            for key, mapped_value in specification["value_map"].items():
+                sentinel = str(key).strip().upper().replace("__OTHER_NONMISSING__", "__OTHER_NON_MISSING__")
+                # Missing source values remain missing without an explicit mapping.
+                if sentinel == "__MISSING__" and mapped_value is None:
+                    continue
+                normalized_map[sentinel if sentinel == "__OTHER_NON_MISSING__" else key] = mapped_value
+            specification["value_map"] = normalized_map
         invented = sorted(
             str(spec.get("source"))
             for spec in proposals.values()

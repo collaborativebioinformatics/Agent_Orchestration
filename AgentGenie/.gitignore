@@ -8,3 +8,5 @@ dist/
 *.egg-info/
 runs/
 workspace/
+demo-video/*.webm
+!demo-video/agentgenie-workflow-demo-clean-final.webm

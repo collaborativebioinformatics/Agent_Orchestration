@@ -87,12 +87,9 @@ def survival_histograms(
     event_field = analysis["event"]["field"]
     group_by = analysis["group_by"]
     _require_fields(data, [time_field, event_field, group_by])
-    selected = pd.Series(True, index=data.index)
-    if analysis.get("subset_cohort"):
-        selected &= _cohort(cohorts, analysis["subset_cohort"])
+    selected = survival_eligibility_mask(data, cohorts, analysis)
     frame = data[selected].copy()
     frame["_time"] = pd.to_numeric(frame[time_field], errors="coerce")
-    frame = frame[frame["_time"].notna()]
     event_values = {_normalized_scalar(value) for value in analysis["event"]["values"]}
     frame["_event"] = frame[event_field].map(_normalized_scalar).isin(event_values)
     bins = analysis["time_bins"]
@@ -109,6 +106,29 @@ def survival_histograms(
             "censored": censored.astype(int).tolist(),
         }
     return {"status": "ok" if groups else "suppressed", "bins": bins, "groups": groups}
+
+
+def survival_eligibility_mask(
+    data: pd.DataFrame,
+    cohorts: dict[str, pd.Series],
+    analysis: dict[str, Any],
+) -> pd.Series:
+    """Return the exact complete-case mask used by federated Kaplan-Meier."""
+    time_field = analysis["time_field"]
+    event_field = analysis["event"]["field"]
+    group_by = analysis["group_by"]
+    _require_fields(data, [time_field, event_field, group_by])
+    selected = pd.Series(True, index=data.index)
+    if analysis.get("subset_cohort"):
+        selected &= _cohort(cohorts, analysis["subset_cohort"])
+    numeric_time = pd.to_numeric(data[time_field], errors="coerce")
+    return (
+        selected
+        & numeric_time.notna()
+        & numeric_time.ge(0)
+        & data[event_field].notna()
+        & data[group_by].notna()
+    )
 
 
 def sufficient_statistics(

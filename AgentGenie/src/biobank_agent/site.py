@@ -11,7 +11,7 @@ import pandas as pd
 from biobank_agent.contracts import AnalysisContract
 from biobank_agent.tools.cohorts import build_cohorts
 from biobank_agent.tools.harmonize import harmonize
-from biobank_agent.tools.local import execute_local_tool
+from biobank_agent.tools.local import execute_local_tool, survival_eligibility_mask
 
 
 class SiteExecutor:
@@ -41,14 +41,37 @@ class SiteExecutor:
             "harmonization": harmonization,
             "cohort_sizes": cohort_sizes,
             "analysis_row_counts": {},
-            "row_exclusion_reason": _row_exclusion_reason(data, contract.payload, cohorts),
+            "row_exclusion_reason": None,
             "analyses": [],
         }
         for index, analysis in enumerate(contract.payload["analyses"]):
             output = execute_local_tool(analysis, data, cohorts, min_cell)
             analysis_id = analysis.get("analysis_id", f"analysis_{index + 1}")
             subset = analysis.get("subset_cohort")
-            if subset in cohort_sizes:
+            if analysis["tool"] == "federated_kaplan_meier":
+                eligible = survival_eligibility_mask(data, cohorts, analysis)
+                rows_used = int(eligible.sum())
+                rows_excluded = int(len(data) - rows_used)
+                disclosure_safe = (rows_used == 0 or rows_used >= min_cell) and (
+                    rows_excluded == 0 or rows_excluded >= min_cell
+                )
+                rows_used_range = None
+                if not disclosure_safe:
+                    if 0 < rows_excluded < min_cell:
+                        rows_used_range = {
+                            "minimum": max(0, len(data) - (min_cell - 1)),
+                            "maximum": len(data) - 1,
+                        }
+                    elif 0 < rows_used < min_cell:
+                        rows_used_range = {"minimum": 1, "maximum": min_cell - 1}
+                result["analysis_row_counts"][analysis_id] = {
+                    "rows_used": rows_used if disclosure_safe else None,
+                    "rows_used_range": rows_used_range,
+                    "selection": "complete cases for the approved time, event, and group fields",
+                }
+                if result["row_exclusion_reason"] is None:
+                    result["row_exclusion_reason"] = _survival_exclusion_reason(data, eligible, min_cell)
+            elif subset in cohort_sizes:
                 result["analysis_row_counts"][analysis_id] = {
                     "rows_used": cohort_sizes[subset],
                     "selection": subset,
@@ -60,7 +83,24 @@ class SiteExecutor:
                     "output": output,
                 }
             )
+        if result["row_exclusion_reason"] is None:
+            result["row_exclusion_reason"] = _row_exclusion_reason(data, contract.payload, cohorts)
         return result
+
+
+def _survival_exclusion_reason(data: pd.DataFrame, eligible: pd.Series, min_cell: int) -> str:
+    excluded = int(len(data) - eligible.sum())
+    if excluded == 0:
+        return "All local rows had valid nonmissing time, event, and group values for this analysis."
+    if excluded < min_cell:
+        return (
+            "A small disclosure-controlled number of local rows was excluded because an approved time, "
+            "event, or group value was missing, nonnumeric, or negative."
+        )
+    return (
+        f"{excluded} local rows were excluded because an approved time, event, or group value was "
+        "missing, nonnumeric, or negative."
+    )
 
 
 def _row_exclusion_reason(

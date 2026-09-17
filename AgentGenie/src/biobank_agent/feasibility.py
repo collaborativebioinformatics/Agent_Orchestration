@@ -2,9 +2,34 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from biobank_agent.contracts import AnalysisContract
+
+
+def promote_verified_site_adapters(
+    contract: AnalysisContract, catalogs: list[dict[str, Any]]
+) -> AnalysisContract:
+    """Promote ready, client-verified mappings into the draft before human review."""
+    payload = copy.deepcopy(contract.payload)
+    harmonization = payload.get("site_harmonization", {})
+    for catalog in catalogs:
+        site_id = str(catalog.get("site_id"))
+        current_fields = harmonization.get(site_id, {}).get("fields", {})
+        assessment = catalog.get("site_agent_assessment", {})
+        adapter = assessment.get("data_adapter", {}) if isinstance(assessment, dict) else {}
+        proposed_fields = adapter.get("fields", {}) if isinstance(adapter, dict) else {}
+        if adapter.get("status") != "ready" or adapter.get("unresolved") or not isinstance(proposed_fields, dict):
+            continue
+        promoted = {
+            canonical: copy.deepcopy(proposed_fields[canonical])
+            for canonical in current_fields
+            if canonical in proposed_fields
+        }
+        if set(promoted) == set(current_fields):
+            harmonization[site_id]["fields"] = promoted
+    return AnalysisContract.parse(payload)
 
 
 def assess_feasibility(contract: AnalysisContract, catalogs: list[dict[str, Any]]) -> dict[str, Any]:
