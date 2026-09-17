@@ -1,0 +1,1 @@
+"""Shared contracts for federated biobank analysis."""
