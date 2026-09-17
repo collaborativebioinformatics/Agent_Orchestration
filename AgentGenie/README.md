@@ -238,12 +238,14 @@ The Controller, client Executor, approval state machine, and job builder are in
 
 ### Timing-compressed workflow demo
 
-The [AgentGenie workflow video](demo-video/agentgenie-workflow-demo-clean-final.webm)
-replays a real analysis contract and aggregate result with compressed agent wait
-times. It is visibly labelled as a recorded replay. The demonstration includes
-the initial question, client feasibility review, researcher-supplied revision
-guidance, a supported second pass, human approval, disclosure-controlled
-feasible-case reporting, and the final Kaplan–Meier curve.
+[![Watch the AgentGenie workflow demo](docs/demo-preview.png)](demo-video/agentgenie-workflow-demo-clean-final.webm)
+
+Click the preview to watch the AgentGenie workflow video. It replays a real
+analysis contract and aggregate result with compressed agent wait times and is
+visibly labelled as a recorded replay. The demonstration includes the initial
+question, client feasibility review, researcher-supplied revision guidance, a
+supported second pass, human approval, disclosure-controlled feasible-case
+reporting, and the final Kaplan–Meier curve.
 
 To reproduce the recording while the local study UI is running:
 
