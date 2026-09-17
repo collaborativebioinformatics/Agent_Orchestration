@@ -1,6 +1,8 @@
-# Agent Orchestration
+# Agent Genie 
 
 ## How to Use
+
+Enter your question. Agent Genie will interpret your question, parse the the available biobanks and propose an analysis. The agent will use the metadata to output suitable statistical analyses for review. 
 
 ![User Interface](assets/UI.png)
 
