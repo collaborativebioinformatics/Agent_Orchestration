@@ -4,6 +4,8 @@
 
 This design illustrates privacy-preserving, agentic analysis across federated biobanks. It separates central coordination from local data access so that multiple institutions can contribute to a shared analysis without exchanging patient-level records.
 
+![AgentGenie system design: NVFlare-orchestrated federated biobank analysis](../assets/biobank-system-design.png)
+
 ### How the workflow operates
 
 1. **Research question:** The researcher submits a scientific question and consents to catalog-only agent planning. The published tool registry defines the only algorithms that may later be approved.
