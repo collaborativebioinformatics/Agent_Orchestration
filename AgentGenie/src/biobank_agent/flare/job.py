@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from biobank_agent.benchmark import create_benchmark_bundle
 from biobank_agent.flare import ANALYSIS_TASK, CATALOG_TASK
 from biobank_agent.flare.controller import BiobankAnalysisController
 from biobank_agent.flare.executor import BiobankSiteExecutor
@@ -79,9 +80,21 @@ def run_biobank_simulation(
     )
     run = recipe.execute(environment)
     workspace = run.get_result(clean_up=False)
+    output_dir = Path(kwargs.get("output_dir", "runs")).resolve()
+    session_id = str(kwargs.get("session_id", "biobank-study"))
+    job_name = str(kwargs.get("job_name", "biobank_agentic_analysis"))
+    run_dir = output_dir / session_id
+    state_path = run_dir / "server" / "workflow_state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
+    benchmark_archive = (
+        create_benchmark_bundle(run_dir, workspace_root=workspace_root, job_name=job_name)
+        if state.get("status") == "COMPLETED"
+        else None
+    )
     return {
         "schema_version": "biobank.nvflare_recipe_run.v1",
         "job_id": run.get_job_id(),
         "clients": client_ids,
         "workspace": workspace,
+        "benchmark_bundle": str(benchmark_archive) if benchmark_archive is not None else None,
     }

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import zipfile
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from biobank_agent.aggregate import aggregate_site_results
+from biobank_agent.benchmark import create_benchmark_bundle
 from biobank_agent.contracts import AnalysisContract
 from biobank_agent.feasibility import assess_feasibility, promote_verified_site_adapters
 from biobank_agent.flare.approval import ApprovalRejected, HumanApprovalGate, create_human_decision
@@ -397,6 +399,69 @@ def test_completed_ui_exposes_final_result_and_disclosure_controlled_row_summary
     assert result["artifacts"] == ["survival.svg"]
     assert result["aggregate"]["site_row_summaries"][0]["analysis_row_counts"]["survival"]["rows_used"] == 20
     assert store.result_artifact("report", "survival.svg").name == "survival.svg"
+
+
+def test_completed_run_creates_privacy_safe_implementation_benchmark_bundle(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "study-one"
+    gate = HumanApprovalGate(run_dir)
+    contract = _contract(approved=True)
+    gate._write(gate.approved_contract_path, contract.payload)
+    gate._write(
+        gate.feasibility_path,
+        {
+            "schema_version": "biobank.feasibility_report.v2",
+            "sites": [
+                {
+                    "site_id": "site_one",
+                    "data_adapter": {
+                        "status": "ready",
+                        "digest": "adapter-digest",
+                        "fields": {"canonical_group": {"source": "local_group"}},
+                    },
+                    "client_agent_proposal": {"analysis_proposals": []},
+                    "all_requested_analyses_supported": True,
+                }
+            ],
+        },
+    )
+    gate._write(gate.approval_path, {"schema_version": "biobank.human_approval.v1"})
+    gate._write(gate.tool_registry_path, {"schema_version": "biobank.tool_registry.v1", "tools": {}})
+    gate._write(gate.server_dir / "server_aggregate.json", {"schema_version": "biobank.server_aggregate.v2"})
+    report = gate.server_dir / "report"
+    report.mkdir(parents=True)
+    (report / "report.md").write_text("# Aggregate result\n", encoding="utf-8")
+    (report / "curve.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'/>", encoding="utf-8")
+    gate.set_state("COMPLETED", contract_digest=contract.digest)
+
+    workspace = tmp_path / "workspace" / "biobank_agentic_analysis"
+    server_job = workspace / "server" / "simulate_job"
+    gate._write(server_job / "meta.json", {"name": "biobank_agentic_analysis"})
+    gate._write(server_job / "app_server" / "config" / "config_fed_server.json", {"workflows": []})
+    server_code = server_job / "app_server" / "custom" / "biobank_agent"
+    server_code.mkdir(parents=True)
+    (server_code / "controller.py").write_text("# frozen server implementation\n", encoding="utf-8")
+    client_job = workspace / "site_one" / "simulate_job" / "app_site_one"
+    gate._write(client_job / "config" / "config_fed_client.json", {"executors": []})
+    client_code = client_job / "custom" / "biobank_agent"
+    client_code.mkdir(parents=True)
+    (client_code / "site.py").write_text("# frozen client implementation\n", encoding="utf-8")
+    (client_job / "data.csv").write_text("patient_id,value\n1,secret\n", encoding="utf-8")
+
+    archive = create_benchmark_bundle(run_dir, workspace_root=tmp_path / "workspace")
+
+    assert archive == gate.server_dir / "benchmark_bundle.zip"
+    adapter = json.loads((gate.server_dir / "benchmark_bundle" / "site_adapters" / "site_one.json").read_text())
+    assert adapter["agent_proposed_adapter"]["digest"] == "adapter-digest"
+    assert adapter["executed_harmonization"] == contract.payload["site_harmonization"]["site_one"]
+    with zipfile.ZipFile(archive) as bundle:
+        names = set(bundle.namelist())
+    assert "site_adapters/site_one.json" in names
+    assert "nvflare_job/server/deployed_biobank_agent/controller.py" in names
+    assert "nvflare_job/clients/site_one/deployed_biobank_agent/site.py" in names
+    assert not any(name.endswith("data.csv") for name in names)
+    store = StudyConsoleStore(run_dir)
+    assert store.snapshot()["final_result"]["benchmark_bundle_available"] is True
+    assert store.benchmark_bundle() == archive
 
 
 def test_ui_reopens_persisted_active_session_after_restart(tmp_path: Path) -> None:
