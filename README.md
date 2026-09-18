@@ -34,7 +34,7 @@ Each local server node performs quality control and model fitting while the glob
 The runnable federated-analysis implementation developed here is packaged in [`AgentGenie/`](AgentGenie/README.md).
 
 ## Team
-- Cecile
+- Cecilie
 - Ziyue
 - Maya
 - Harris
