@@ -1,0 +1,23 @@
+{
+  "package": "metabric_sites",
+  "version": "1.0.0",
+  "seed": 12,
+  "source": "Kaggle METABRIC_RNA_Mutation.csv",
+  "files": [
+    {
+      "path": "sites/site_a_university_hospital/data.csv",
+      "rows": 801,
+      "sha256": "6286448c9c3fde9a24bab02a937dfaeaf2b59f47271e5113475d90a8e9bea675"
+    },
+    {
+      "path": "sites/site_b_cancer_centre/data.csv",
+      "rows": 728,
+      "sha256": "c9a22800e0a7d417a68168ce2fbd88a90af2ee5bc661cad5cddcd218da8aae4b"
+    },
+    {
+      "path": "sites/site_c_regional_hospital/data.csv",
+      "rows": 387,
+      "sha256": "1de8c869f5ab2b607290bd4ad19b0935e356b42964dff08a15f2d53640ecc2eb"
+    }
+  ]
+}

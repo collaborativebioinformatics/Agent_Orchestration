@@ -16,7 +16,13 @@ from global_agent.flare_gateway import (
     MockFederatedGateway,
     TransportFederatedGateway,
 )
-from shared.schemas import AnalysisPlan, Operation, SiteResponse
+from shared.schemas import (
+    AnalysisPlan,
+    Operation,
+    PrivacyMetadata,
+    ResponseStatus,
+    SiteResponse,
+)
 
 
 def run(coroutine):
@@ -27,6 +33,7 @@ def run(coroutine):
 
 
 def make_plan() -> AnalysisPlan:
+
     """
     Construct a minimal plan for gateway unit tests.
 
@@ -44,23 +51,41 @@ def make_plan() -> AnalysisPlan:
     )
 
 
+def make_privacy_metadata() -> PrivacyMetadata:
+    return PrivacyMetadata(
+        minimum_cell_size_applied=10,
+        suppressed=False,
+    )
+
+
 def make_site_response(
     site_id: str,
     request_id: str = "request-001",
     count: int = 100,
 ) -> SiteResponse:
-    """
-    Construct a minimal response for testing gateway orchestration.
-
-    The aggregator tests will verify the detailed result payload.
-    """
-    return SiteResponse.model_construct(
-        site_id=site_id,
+    return SiteResponse(
         request_id=request_id,
-        payload={"count": count},
+        site_id=site_id,
+        operation=Operation.COHORT_COUNT,
+        status=ResponseStatus.SUCCESS,
+        dataset_id="demo_dataset",
+        result={"count": count},
+        privacy=make_privacy_metadata(),
+        warnings=[],
+        metadata={},
     )
 
 
+def test_site_response_fixture_is_valid() -> None:
+    response = make_site_response(
+        site_id="biobank-a",
+        request_id="request-test",
+    )
+
+    assert response.site_id == "biobank-a"
+    assert response.result == {"count": 100}
+
+    
 def test_mock_gateway_dispatches_to_three_sites() -> None:
     plan = make_plan()
 
@@ -551,12 +576,10 @@ def test_replace_mock_site_handler() -> None:
     )
 
     assert len(result.responses) == 1
-    assert result.responses[0].payload["count"] == 99
+    assert result.responses[0].result["count"] == 99
 
 
 class FakeFlareTransport:
-    """Small fake implementing the FlareTransport protocol."""
-
     def __init__(
         self,
         responses: Mapping[str, SiteResponse | Exception],
@@ -586,9 +609,7 @@ class FakeFlareTransport:
         if isinstance(response, Exception):
             raise response
 
-        # SiteResponse.model_validate accepts an existing SiteResponse.
-        return response  # type: ignore[return-value]
-
+        return response.model_dump(mode="json")
 
 def test_transport_gateway_builds_flare_task_payload() -> None:
     transport = FakeFlareTransport(
@@ -679,3 +700,4 @@ def test_gateway_constructor_validation() -> None:
             transport=transport,
             max_concurrency=0,
         )
+

@@ -1,0 +1,15 @@
+policy_id: site_b_cancer_centre_v1
+min_cell_count: 10
+allowed_outputs:
+- counts
+- sums
+- histograms
+- model_coefficients
+- gradients
+- metrics
+forbidden_outputs:
+- row_level
+- exact_min_max
+- patient_ids
+allow_model_training: true
+max_queries_per_study: 25

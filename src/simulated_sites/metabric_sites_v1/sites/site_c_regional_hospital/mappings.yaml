@@ -1,0 +1,8 @@
+site_id: site_c_regional_hospital
+cdm_version: 1
+survival_unit: months
+tumor_size_unit: cm
+er_status_coding: binary
+outcome:
+  event_cancer_death: death_from_cancer == 'Died of Disease'
+  time: overall_survival_months

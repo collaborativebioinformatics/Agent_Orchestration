@@ -1,0 +1,152 @@
+{
+  "site_id": "site_b_cancer_centre",
+  "display_name": "Cancer Centre",
+  "cdm_version": 1,
+  "collection": "breast_cancer",
+  "n_patients": "500-999",
+  "clinical_features": {
+    "age_at_diagnosis": {
+      "type": "numeric",
+      "available_pct": 100.0
+    },
+    "type_of_breast_surgery": {
+      "type": "categorical",
+      "available_pct": 98.5
+    },
+    "cancer_type": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "cancer_type_detailed": {
+      "type": "categorical",
+      "available_pct": 98.9
+    },
+    "cellularity": {
+      "type": "categorical",
+      "available_pct": 89.2
+    },
+    "chemotherapy": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "pam50_+_claudin-low_subtype": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "cohort": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "er_status_measured_by_ihc": {
+      "type": "categorical",
+      "available_pct": 99.0
+    },
+    "er_status": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "neoplasm_histologic_grade": {
+      "type": "categorical",
+      "available_pct": 97.0
+    },
+    "her2_status_measured_by_snp6": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "her2_status": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "tumor_other_histologic_subtype": {
+      "type": "categorical",
+      "available_pct": 98.9
+    },
+    "hormone_therapy": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "inferred_menopausal_state": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "integrative_cluster": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "primary_tumor_laterality": {
+      "type": "categorical",
+      "available_pct": 93.0
+    },
+    "lymph_nodes_examined_positive": {
+      "type": "numeric",
+      "available_pct": 100.0
+    },
+    "mutation_count": {
+      "type": "numeric",
+      "available_pct": 97.2
+    },
+    "nottingham_prognostic_index": {
+      "type": "numeric",
+      "available_pct": 100.0
+    },
+    "oncotree_code": {
+      "type": "categorical",
+      "available_pct": 98.9
+    },
+    "overall_survival": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "pr_status": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "radio_therapy": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "3-gene_classifier_subtype": {
+      "type": "categorical",
+      "available_pct": 88.6
+    },
+    "tumor_size": {
+      "type": "numeric",
+      "available_pct": 98.9
+    },
+    "tumor_stage": {
+      "type": "categorical",
+      "available_pct": 69.7
+    },
+    "death_from_cancer": {
+      "type": "categorical",
+      "available_pct": 100.0
+    },
+    "brca1": {
+      "type": "numeric",
+      "available_pct": 100.0
+    },
+    "time_months": {
+      "type": "numeric",
+      "available_pct": 100.0
+    },
+    "event_cancer_death": {
+      "type": "categorical",
+      "available_pct": 100.0
+    }
+  },
+  "genomics": {
+    "mrna_zscores": 488,
+    "mutation_genes": 173
+  },
+  "allowed_tools": [
+    "describe_cohort",
+    "count_patients",
+    "calculate_prevalence",
+    "calculate_numeric_summary",
+    "calculate_missingness",
+    "calculate_class_distribution",
+    "calculate_correlation_sufficient_statistics",
+    "cox_ph_local",
+    "fit_local_model"
+  ]
+}

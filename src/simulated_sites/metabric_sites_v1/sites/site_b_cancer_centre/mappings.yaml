@@ -1,0 +1,10 @@
+site_id: site_b_cancer_centre
+cdm_version: 1
+survival_unit: years
+tumor_size_unit: mm
+er_status_coding: text
+outcome:
+  event_cancer_death: death_from_cancer == 'Died of Disease'
+  time: overall_survival_years
+
+
