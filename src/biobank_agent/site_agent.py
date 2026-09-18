@@ -1,4 +1,4 @@
-"""Codex-backed, metadata-only planning inside each site boundary."""
+"""Codex-backed adapter generation inside each site boundary."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from biobank_agent.codex import CodexPlanner
+from biobank_agent.local_profile import verify_adapter_locally
 from biobank_agent.tools.registry import TOOL_MANIFESTS
 
 
@@ -24,8 +25,12 @@ class CodexSiteAgent:
         question: str,
         catalog: dict[str, Any],
         mappings_yaml: str,
+        local_profile: dict[str, Any] | None = None,
+        local_data: Any | None = None,
     ) -> dict[str, Any]:
-        prompt = self._prompt(question, catalog, mappings_yaml)
+        # mappings_yaml remains in the API for compatibility with older callers,
+        # but is intentionally not supplied to the agent or used as a fallback.
+        prompt = self._prompt(question, catalog, local_profile or {})
         validation_error: ValueError | None = None
         with tempfile.TemporaryDirectory(prefix=f"biobank-site-agent-{catalog.get('site_id', 'site')}-") as directory:
             work_dir = Path(directory)
@@ -33,6 +38,10 @@ class CodexSiteAgent:
                 result = self.planner.run_json(prompt, work_dir / f"attempt-{attempt + 1}")
                 try:
                     self._validate(result, catalog)
+                    if local_data is not None:
+                        verify_adapter_locally(
+                            result["data_adapter"], local_data, str((local_profile or {}).get("digest", ""))
+                        )
                     break
                 except ValueError as exc:
                     validation_error = exc
@@ -82,13 +91,18 @@ set status to incomplete, and omit analyses that depend on it.
         }
 
     @staticmethod
-    def _prompt(question: str, catalog: dict[str, Any], mappings_yaml: str) -> str:
+    def _prompt(
+        question: str, catalog: dict[str, Any], local_profile: dict[str, Any]
+    ) -> str:
         return f"""You are a site agent inside one federated biobank boundary.
-Inspect only the supplied catalog, CSV header field names, and declared mappings. Do not
-request, infer, or emit patient values. Decide locally which scientific concepts are
+Inspect the supplied catalog, CSV header names, and disclosure-controlled local profile.
+Do not request or emit patient rows. Decide locally which scientific concepts are
 supported, how local fields could map to canonical names, and which registered aggregate-
-only tools could execute the request. A field's presence does not prove an encoding; flag
-unknown value encodings explicitly. Do not substitute mRNA z-scores for raw expression or
+only tools could execute the request. Generate the adapter from locally observed profile
+evidence. Do not rely on a pre-supplied mapping and do not expect a deterministic mapping
+fallback. A field's presence alone does not prove an
+encoding; use observed categories and privacy-safe associations when available. Do not
+substitute mRNA z-scores for raw expression or
 claim log2 fold changes from z-scores. Return exactly one JSON object and no prose.
 The catalog's schema_fields array is the absolute allowlist for every data-adapter
 source. Other catalog concepts and declared mapping entries may describe derived or
@@ -102,14 +116,18 @@ Research question:
 Local catalog and header:
 {json.dumps(catalog, indent=2, sort_keys=True)}
 
-Declared mappings YAML:
-{mappings_yaml}
+Disclosure-controlled profile generated locally from this site's data:
+{json.dumps(local_profile, indent=2, sort_keys=True)}
 
 Registered analysis primitives:
 {json.dumps(TOOL_MANIFESTS, indent=2, sort_keys=True)}
 
-The registered analysis primitives above are the current server registry presented for
-human approval. Treat that registry as authoritative for proposing tools. A catalog's
+The registered analysis primitives above are the preferred server toolbox presented for
+human approval. Prefer them when they correctly implement the request. If none can do so,
+request a new general-purpose dynamic algorithm rather than declaring an otherwise
+feasible analysis unavailable. Describe the aggregate statistics the client must produce
+and how the server should combine them; the server agent will author the implementation,
+and its complete source will require explicit human approval. A catalog's
 allowed_tools field is legacy descriptive metadata, not a second execution allowlist;
 do not reject or caveat a registered tool merely because it is absent there. Nothing
 executes until the researcher approves the final contract.
@@ -126,9 +144,23 @@ Return this exact shape:
     "fields": {{"canonical_field": {{"source": "existing header field", "value_map": {{}}, "multiply": 1.0}}}},
     "unresolved": [{{"canonical_field": "...", "reason": "..."}}]
   }},
-  "analysis_proposals": [{{"tool": "registered tool name", "parameters": {{}}, "caveats": ["..."]}}]
+  "analysis_proposals": [{{"tool": "registered tool name or requested dynamic name", "parameters": {{}}, "caveats": ["..."]}}],
+  "dynamic_tool_requests": [{{
+    "name": "dynamic_general_purpose_name",
+    "purpose": "...",
+    "required_fields": ["canonical_field"],
+    "local_aggregate_requirements": ["..."],
+    "server_computation": "...",
+    "privacy_constraints": ["..."]
+  }}]
 }}
-Use empty arrays or objects when needed. Never invent a source field or tool name.
+Use empty arrays or objects when needed. Never invent a source field. A dynamic tool name
+must start with dynamic_ and appear identically in dynamic_tool_requests and any related
+analysis_proposals.
+The deterministic boundary verifier checks only safety, structure, observed categorical
+coverage, and binary event output shape. It never creates, repairs, or substitutes a
+semantic mapping. Your data-supported adapter is the sole mapping sent to the server; if
+the evidence is insufficient, mark the field unresolved.
 """
 
     @staticmethod
@@ -167,10 +199,23 @@ Use empty arrays or objects when needed. Never invent a source field or tool nam
         analyses = value.get("analysis_proposals", [])
         if not isinstance(analyses, list):
             raise ValueError("analysis_proposals must be a list")
+        requests = value.get("dynamic_tool_requests", [])
+        if not isinstance(requests, list):
+            raise ValueError("dynamic_tool_requests must be a list")
+        dynamic_names = {
+            item.get("name")
+            for item in requests
+            if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"].startswith("dynamic_")
+        }
+        malformed_requests = [
+            item for item in requests if not isinstance(item, dict) or item.get("name") not in dynamic_names
+        ]
+        if malformed_requests:
+            raise ValueError("Every dynamic tool request requires a dynamic_<name> identifier")
         unknown = sorted(
             str(item.get("tool") if isinstance(item, dict) else item)
             for item in analyses
-            if not isinstance(item, dict) or item.get("tool") not in TOOL_MANIFESTS
+            if not isinstance(item, dict) or item.get("tool") not in set(TOOL_MANIFESTS) | dynamic_names
         )
         if unknown:
             raise ValueError(f"Site agent proposed unregistered tools: {unknown}")

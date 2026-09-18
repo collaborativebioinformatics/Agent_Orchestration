@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from biobank_agent.tools.dynamic import execute_dynamic_local
+
 
 def _normalized_scalar(value: Any) -> str | None:
     """Normalize semantically equal numeric/string contract values to one token."""
@@ -26,6 +28,7 @@ def execute_local_tool(
     data: pd.DataFrame,
     cohorts: dict[str, pd.Series],
     min_cell: int,
+    dynamic_tools: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     tool = analysis["tool"]
     if tool == "federated_histogram":
@@ -38,6 +41,8 @@ def execute_local_tool(
         return sufficient_statistics(data, cohorts, analysis["fields"], analysis["cohorts"], min_cell)
     if tool == "missingness_summary":
         return missingness(data, analysis["fields"])
+    if dynamic_tools and tool in dynamic_tools:
+        return execute_dynamic_local(dynamic_tools[tool], analysis, data, min_cell)
     raise ValueError(f"No local implementation for {tool}")
 
 

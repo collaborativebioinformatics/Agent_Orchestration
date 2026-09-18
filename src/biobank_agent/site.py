@@ -12,6 +12,7 @@ from biobank_agent.contracts import AnalysisContract
 from biobank_agent.tools.cohorts import build_cohorts
 from biobank_agent.tools.harmonize import harmonize
 from biobank_agent.tools.local import execute_local_tool, survival_eligibility_mask
+from biobank_agent.tools.dynamic import validate_dynamic_tools
 
 
 class SiteExecutor:
@@ -44,8 +45,14 @@ class SiteExecutor:
             "row_exclusion_reason": None,
             "analyses": [],
         }
+        dynamic_tools = validate_dynamic_tools(contract.payload.get("dynamic_tools", []))
         for index, analysis in enumerate(contract.payload["analyses"]):
-            output = execute_local_tool(analysis, data, cohorts, min_cell)
+            target_site = analysis.get("site_id")
+            if isinstance(target_site, str) and target_site != self.site_id:
+                continue
+            output = execute_local_tool(analysis, data, cohorts, min_cell, dynamic_tools)
+            if analysis["tool"] in dynamic_tools:
+                output = {**output, "site_id": self.site_id}
             analysis_id = analysis.get("analysis_id", f"analysis_{index + 1}")
             subset = analysis.get("subset_cohort")
             if analysis["tool"] == "federated_kaplan_meier":

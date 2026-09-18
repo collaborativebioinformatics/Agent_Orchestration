@@ -26,14 +26,14 @@ class CodexPlanner:
     def plan(self, question: str, catalogs: list[dict[str, Any]], work_dir: Path) -> AnalysisContract:
         prompt = self._prompt(question, catalogs)
         validation_error: ValueError | None = None
-        for attempt in range(2):
+        for attempt in range(3):
             value = self.run_json(prompt, work_dir / f"attempt-{attempt + 1}")
             try:
                 return AnalysisContract.parse(value)
             except ValueError as exc:
                 validation_error = exc
                 prompt = self._contract_repair_prompt(prompt, value, exc)
-        raise ValueError(f"Server agent could not produce a valid analysis contract after one retry: {validation_error}")
+        raise ValueError(f"Server agent could not produce a valid analysis contract after two retries: {validation_error}")
 
     @staticmethod
     def _contract_repair_prompt(original_prompt: str, invalid: dict[str, Any], error: ValueError) -> str:
@@ -49,11 +49,20 @@ Return a corrected complete contract. In each analyses item, put every tool para
 directly at the top level beside analysis_id and tool. Never use a nested parameters
 object. For federated_kaplan_meier this means top-level time_field, event, group_by,
 time_bins, and optional subset_cohort. For missingness_summary, fields is top-level.
+For federated_kaplan_meier, event MUST be an object and time_bins MUST be an array:
+"event": {{"field": "canonical_event_field", "values": [1]}},
+"time_bins": [0, 12, 24, 36]. Never emit event as a string and never wrap time_bins
+in a boundaries object. Select event values only from the client-proposed endpoint
+encoding; if that encoding is unresolved, do not emit the analysis.
 Every cohort predicate must contain a real non-empty predicate; never emit all: [].
 Use the exact complete field specifications proposed by each client data adapter,
 including source, multiply, and value_map. Preserve the verified
 __OTHER_NON_MISSING__ default when a client proposed it; missing values remain missing
 without an explicit __MISSING__ entry. Preserve all privacy and scientific caveats.
+If the rejected contract contains a dynamic tool, preserve its complete dynamic_tools
+entry and correct it according to the verifier error. Dynamic source contains exactly
+one function and no imports: def run_local(data, analysis, min_cell_count) for the client
+and def run_server(outputs, analysis) for the server.
 """
 
     def synthesize_human_review(
@@ -78,6 +87,11 @@ Proposed server contract:
 Client-agent proposals and feasibility:
 {json.dumps(feasibility, indent=2, sort_keys=True)}
 
+Contract analysis parameters are intentionally top-level beside analysis_id and tool,
+as required by the registered tool manifests. The nested parameters object in each
+client analysis_proposals item is only that proposal message's shape; do not ask to
+move valid contract parameters into it.
+
 Return this exact shape:
 {{
   "schema_version": "biobank.server_agent_review.v1",
@@ -95,6 +109,10 @@ full_revision_guidance. A registered tool is eligible for human approval even wh
 legacy catalog allowed_tools field omits it. If action is approve, leave
 full_revision_guidance empty and summarize the exact endpoint, population, tools,
 harmonization assumptions, and privacy policy being approved.
+For every dynamic tool, explicitly tell the researcher that agent-generated local and
+server source code is included in the approval-bound contract. Summarize its local
+aggregates, pooling method, missing-data rule, and privacy checks. Never describe a
+dynamic tool as pre-validated or registered.
 
 When every site reports all_requested_analyses_supported=true, recommend approve. Do
 not request another revision for assumptions already incorporated into the proposed
@@ -127,6 +145,11 @@ proposals.
                 "Confirm the displayed site-specific harmonization and shared tool parameters.",
                 "Confirm the minimum-cell and aggregate-only privacy controls.",
             ]
+            if contract.payload.get("dynamic_tools"):
+                value["confirmation_items"].insert(
+                    2,
+                    "Confirm the displayed agent-generated local and server algorithm source included in this contract.",
+                )
             value["full_revision_guidance"] = ""
         if value.get("schema_version") != "biobank.server_agent_review.v1":
             raise ValueError("Unsupported server-agent review schema")
@@ -215,10 +238,11 @@ Server-visible site catalogs:
 General-purpose tool registry:
 {json.dumps(TOOL_MANIFESTS, indent=2, sort_keys=True)}
 
-This server registry is the authoritative list of tools eligible for researcher
-approval. Catalog allowed_tools fields are legacy descriptive metadata and must not be
-treated as a second execution gate. A registered tool may be proposed when the client
-agent supplied a valid data adapter; it still cannot execute until human approval.
+This registry is the preferred toolbox. Catalog allowed_tools fields are legacy
+descriptive metadata and must not be treated as a second execution gate. If no registered
+tool correctly implements the question and client dynamic_tool_requests agree on the
+needed aggregate computation, author a general-purpose dynamic tool. Its complete source
+becomes part of the digest-bound contract and cannot execute until human approval.
 
 The object must follow this exact shape (arrays must remain arrays):
 {{
@@ -237,6 +261,16 @@ The object must follow this exact shape (arrays must remain arrays):
     }}}}
   }},
   "approved_tools": ["registered_tool_name"],
+  "dynamic_tools": [{{
+    "name": "dynamic_general_purpose_name",
+    "version": 1,
+    "description": "scientific operation without disease-specific semantics",
+    "required_parameters": ["fields"],
+    "local_output": "aggregate-only output description",
+    "server_operation": "pooling and final calculation description",
+    "local_code": "def run_local(data, analysis, min_cell_count):\n    ...",
+    "server_code": "def run_server(outputs, analysis):\n    ..."
+  }}],
   "privacy": {{"min_cell_count": 10, "forbidden_outputs": ["row_level", "patient_ids", "exact_min_max"]}},
   "analyses": [{{"analysis_id": "id", "tool": "registered_tool_name", "cohorts": ["cohort_name"]}}],
   "unavailable_requests": [{{"concept": "...", "reason": "..."}}],
@@ -258,4 +292,26 @@ unresolved adapter concepts in unavailable_requests. The server must not invent
 or override a client-local mapping.
 Every tool parameter must be placed directly in its analyses item; never create a
 nested parameters object. Every all/any predicate must contain at least one child.
+Registered-tool parameter shapes are exact. In particular, a Kaplan–Meier analysis uses:
+{{"analysis_id":"id","tool":"federated_kaplan_meier",
+"time_field":"canonical_time","event":{{"field":"canonical_event","values":[1]}},
+"group_by":"canonical_group","time_bins":[0,12,24,36]}}.
+The event member is never a string, and time_bins is never an object. Choose event
+values only from the client-proposed endpoint encoding.
+
+Dynamic implementation interface and constraints:
+- Use a dynamic tool only when the fixed registry cannot correctly perform the task.
+- Its name starts with dynamic_ and appears in approved_tools and analyses.
+- local_code contains exactly def run_local(data, analysis, min_cell_count). It receives
+  a pandas DataFrame limited to analysis.fields, the analysis object, and the privacy
+  threshold. It returns finite JSON with schema_version
+  biobank.dynamic_local_output.v1 and only disclosure-controlled aggregates.
+- server_code contains exactly def run_server(outputs, analysis). It receives only local
+  aggregate objects and returns finite JSON.
+- No imports, filesystem, network, processes, reflection, private/dunder attributes,
+  identifiers, row records, or patient values. numpy is available as np, pandas as pd,
+  and math as math.
+- Suppress each local result whose n is below min_cell_count. Never reconstruct a
+  suppressed value at the server. Use pairwise complete cases when required.
+- Source, parameters, adapters, and privacy rules are all reviewed and approval-bound.
 """

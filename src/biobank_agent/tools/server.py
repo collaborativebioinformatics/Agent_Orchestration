@@ -8,8 +8,12 @@ from typing import Any
 import numpy as np
 from scipy.stats import chi2_contingency
 
+from biobank_agent.tools.dynamic import execute_dynamic_server
 
-def aggregate_tool(analysis: dict[str, Any], outputs: list[dict[str, Any]]) -> dict[str, Any]:
+
+def aggregate_tool(
+    analysis: dict[str, Any], outputs: list[dict[str, Any]], dynamic_tools: dict[str, dict[str, Any]] | None = None
+) -> dict[str, Any]:
     tool = analysis["tool"]
     if tool == "federated_histogram":
         return _histogram(outputs)
@@ -21,6 +25,8 @@ def aggregate_tool(analysis: dict[str, Any], outputs: list[dict[str, Any]]) -> d
         return _statistics(outputs)
     if tool == "missingness_summary":
         return _missingness(outputs)
+    if dynamic_tools and tool in dynamic_tools:
+        return execute_dynamic_server(dynamic_tools[tool], analysis, outputs)
     raise ValueError(f"No server implementation for {tool}")
 
 

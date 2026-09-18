@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,28 @@ def render_report(aggregate: dict[str, Any], contract: dict[str, Any], output_di
             for field, values in result["fields"].items():
                 lines.append(f"- {field}: {_number(values['missing_fraction'])} missing ({values['missing']} of {values['missing'] + values['observed']}).")
             lines.append("")
+        elif tool.startswith("dynamic_") and (
+            result.get("status") == "ok" or result.get("schema_version") == "biobank.dynamic_server_output.v1"
+        ):
+            lines.extend(
+                [
+                    "This result was produced by agent-generated local and server code that was included in the human-approved contract.",
+                    "",
+                ]
+            )
+            matrices = _dynamic_matrices(result)
+            if matrices:
+                for matrix_name, fields, matrix in matrices:
+                    matrix_title = str(matrix_name).replace("_", " ").title()
+                    lines.extend([f"#### {matrix_title}", ""])
+                    _append_matrix(lines, fields, matrix)
+                    safe_name = "".join(character if character.isalnum() else "_" for character in str(matrix_name))
+                    path = output_dir / f"{analysis_id}_{safe_name}.svg"
+                    _correlation_svg(fields, matrix, path, title=f"{title} — {matrix_title}")
+                    figures.append(path)
+                    lines.extend([f"![{title} — {matrix_title}]({path.name})", ""])
+            else:
+                lines.extend(["```json", json.dumps(result, indent=2, sort_keys=True), "```", ""])
         else:
             lines.extend([f"Not estimable: {result.get('status', 'unknown status')}.", ""])
     unavailable = contract.get("unavailable_requests", [])
@@ -74,13 +97,14 @@ def render_report(aggregate: dict[str, Any], contract: dict[str, Any], output_di
         for item in unavailable:
             lines.append(f"- **{item.get('concept')}** — {item.get('reason')}" if isinstance(item, dict) else f"- {item}")
         lines.append("")
-    lines.extend(
-        [
-            "## Interpretation limits",
-            "",
-            "Cohorts, harmonization, endpoints, groups, and bins are defined by the approved contract. Small local cells are suppressed. Kaplan–Meier curves are binned and descriptive; observational comparisons are not causal or clinical advice.",
-        ]
-    )
+    limits = [
+        "Cohorts, harmonization, endpoints, groups, and other analysis parameters are defined by the approved contract. Small local cells are suppressed. Observational results are not causal or clinical advice."
+    ]
+    if any(item["tool"] == "federated_kaplan_meier" for item in aggregate["analyses"]):
+        limits.append("Kaplan–Meier curves are time-binned and descriptive.")
+    if any(item["tool"].startswith("dynamic_") for item in aggregate["analyses"]):
+        limits.append("Dynamic results use the exact agent-generated source included in the human-approved contract.")
+    lines.extend(["## Interpretation limits", "", " ".join(limits)])
     report_path = output_dir / "report.md"
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return [report_path, *figures]
@@ -88,6 +112,75 @@ def render_report(aggregate: dict[str, Any], contract: dict[str, Any], output_di
 
 def _number(value: Any) -> str:
     return "NA" if value is None else f"{value:.3f}"
+
+
+def _append_matrix(lines: list[str], fields: list[str], matrix: Any) -> None:
+    if not fields or not isinstance(matrix, list) or len(matrix) != len(fields):
+        lines.extend(["Not estimable after disclosure control.", ""])
+        return
+    lines.append("| Variable | " + " | ".join(fields) + " |")
+    lines.append("| --- | " + " | ".join("---:" for _ in fields) + " |")
+    for row_index, row in enumerate(fields):
+        values = matrix[row_index] if row_index < len(matrix) else []
+        rendered = [
+            "NA" if not isinstance(values, list) or column_index >= len(values) or values[column_index] is None else f"{float(values[column_index]):.4f}"
+            for column_index, _ in enumerate(fields)
+        ]
+        lines.append(f"| {row} | " + " | ".join(rendered) + " |")
+    lines.append("")
+
+
+def _dynamic_matrices(result: dict[str, Any]) -> list[tuple[str, list[str], list[list[Any]]]]:
+    fields = [str(field) for field in result.get("fields", [])]
+    matrices: list[tuple[str, list[str], list[list[Any]]]] = []
+    for item in result.get("site_results", []):
+        if isinstance(item, dict) and isinstance(item.get("correlation_matrix"), list):
+            matrices.append((str(item.get("site_id", "site")), fields, item["correlation_matrix"]))
+    federated = result.get("federated_result")
+    if isinstance(federated, dict) and isinstance(federated.get("correlation_matrix"), list):
+        matrices.append(("federated", fields, federated["correlation_matrix"]))
+    legacy = result.get("matrices")
+    if not matrices and isinstance(legacy, dict):
+        for name, matrix in legacy.items():
+            if not isinstance(matrix, dict):
+                continue
+            legacy_fields = sorted(str(field) for field in matrix)
+            rows = [
+                [matrix.get(row, {}).get(column) for column in legacy_fields]
+                for row in legacy_fields
+            ]
+            matrices.append((str(name), legacy_fields, rows))
+    return matrices
+
+
+def _correlation_svg(fields: list[str], matrix: list[list[Any]], path: Path, title: str) -> None:
+    count = max(len(fields), 1)
+    cell = min(120, 600 / count)
+    left, top = 220, 95
+    size = left + cell * count + 55
+    height = top + cell * count + 80
+    parts = []
+    for index, field in enumerate(fields):
+        label = html.escape(field)
+        coordinate = top + index * cell + cell / 2 + 4
+        parts.append(f'<text x="{left-12}" y="{coordinate:.1f}" text-anchor="end" fill="#ddd" font-family="sans-serif" font-size="12">{label}</text>')
+        parts.append(f'<text x="{left+index*cell+cell/2:.1f}" y="{top-12}" text-anchor="middle" fill="#ddd" font-family="sans-serif" font-size="12">{label}</text>')
+    for row in range(count):
+        for column in range(count):
+            value = matrix[row][column] if row < len(matrix) and column < len(matrix[row]) else None
+            numeric = float(value) if value is not None else 0.0
+            intensity = min(1.0, abs(numeric))
+            if value is None:
+                color = "#303536"
+            elif numeric >= 0:
+                color = f"rgb({int(28+40*(1-intensity))},{int(80+110*intensity)},{int(70+20*(1-intensity))})"
+            else:
+                color = f"rgb({int(95+125*intensity)},{int(55+25*(1-intensity))},{int(65+35*(1-intensity))})"
+            x, y = left + column * cell, top + row * cell
+            parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{cell-2:.1f}" height="{cell-2:.1f}" rx="5" fill="{color}"/>')
+            text = "NA" if value is None else f"{numeric:.3f}"
+            parts.append(f'<text x="{x+cell/2:.1f}" y="{y+cell/2+5:.1f}" text-anchor="middle" fill="#fff" font-family="sans-serif" font-size="14">{text}</text>')
+    path.write_text(_svg_frame(title, "".join(parts), width=int(size), height=int(height)), encoding="utf-8")
 
 
 def _svg_frame(title: str, body: str, width: int = 900, height: int = 540) -> str:

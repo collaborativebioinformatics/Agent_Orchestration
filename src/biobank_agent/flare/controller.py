@@ -27,8 +27,9 @@ from nvflare.apis.signal import Signal
 class BiobankAnalysisController(Controller):
     """Own the complete analysis lifecycle, including the human gate.
 
-    Patient data are first accessed only after ``HumanApprovalGate.wait``
-    returns a validated, digest-bound approved contract.
+    Before approval, sites may compute disclosure-controlled local profiles for
+    adapter verification. Patient rows never leave a client boundary and full
+    analysis begins only after ``HumanApprovalGate.wait`` validates approval.
     """
 
     def __init__(
@@ -96,7 +97,7 @@ class BiobankAnalysisController(Controller):
                 question = str(request["question"])
                 gate.record_event(
                     "question",
-                    "Research question received; catalog-only Codex planning consent was recorded.",
+                    "Research question received; site-local disclosure-controlled adapter planning consent was recorded.",
                     actor="researcher",
                     status="completed",
                 )
@@ -106,7 +107,12 @@ class BiobankAnalysisController(Controller):
             finally:
                 gate.timeout_seconds = self.approval_timeout
 
-        gate.set_state("DISCOVERING", patient_data_accessed=False, question_received=True)
+        gate.set_state(
+            "DISCOVERING",
+            patient_data_accessed_locally_for_profile=True,
+            patient_rows_or_values_shared=False,
+            question_received=True,
+        )
         gate.record_event(
             "catalog_dispatch",
             f"Dispatched catalog discovery to {len(self.client_ids)} clients.",
@@ -121,10 +127,14 @@ class BiobankAnalysisController(Controller):
             gate.set_state("ABORTED", reason="Run aborted during catalog discovery")
             return
 
-        gate.set_state("PLANNING", patient_data_accessed=False)
+        gate.set_state(
+            "PLANNING",
+            patient_data_accessed_locally_for_profile=True,
+            patient_rows_or_values_shared=False,
+        )
         gate.record_event(
             "planning",
-            "Catalog metadata was sent to Codex to draft a tool-bounded analysis contract.",
+            "Verified client adapters and disclosure-controlled profile evidence were sent to Codex to draft a tool-bounded analysis contract.",
             status="active",
         )
         try:

@@ -10,8 +10,10 @@ import pytest
 
 from biobank_agent.aggregate import aggregate_site_results
 from biobank_agent.benchmark import create_benchmark_bundle
+from biobank_agent.codex import CodexPlanner
 from biobank_agent.contracts import AnalysisContract
 from biobank_agent.feasibility import assess_feasibility, promote_verified_site_adapters
+from biobank_agent.local_profile import build_local_profile, verify_adapter_locally
 from biobank_agent.flare.approval import ApprovalRejected, HumanApprovalGate, create_human_decision
 from biobank_agent.site import SiteExecutor
 from biobank_agent.site_agent import CodexSiteAgent
@@ -296,10 +298,13 @@ def test_feasibility_exposes_client_agent_proposal_for_human_review() -> None:
         },
     }
 
-    site = assess_feasibility(proposal, [catalog])["sites"][0]
+    report = assess_feasibility(proposal, [catalog])
+    site = report["sites"][0]
 
     assert site["data_adapter"]["fields"]["canonical_group"]["source"] == "local_group"
     assert site["client_agent_proposal"]["analysis_proposals"][0]["tool"] == "federated_histogram"
+    assert report["federation_ready"] is True
+    assert site["fedready"] is True
 
 
 def test_server_promotes_ready_verified_site_adapter_before_human_review() -> None:
@@ -501,6 +506,31 @@ def test_ui_ignores_active_session_pointer_outside_output_root(tmp_path: Path) -
     assert restarted.gate.run_dir == fallback.resolve()
 
 
+def test_ui_can_start_fresh_session_after_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    failed_run = tmp_path / "failed-session"
+    HumanApprovalGate(failed_run).set_state("FAILED", reason="contract planning failed")
+    launched: list[list[str]] = []
+
+    class FakeProcess:
+        def __init__(self, command: list[str], **kwargs: object) -> None:
+            launched.append(command)
+
+    monkeypatch.setattr("biobank_agent.ui.server.subprocess.Popen", FakeProcess)
+    store = StudyConsoleStore(
+        failed_run,
+        sites_root=tmp_path / "sites",
+        workspace_root=tmp_path / "workspace",
+        output_root=tmp_path,
+    )
+
+    result = store.start_new_session("Cecilie")
+
+    assert result["session_id"].startswith("ui-")
+    assert store.snapshot()["state"]["status"] == "STARTING"
+    assert launched and "run-simulation" in launched[0]
+    assert HumanApprovalGate(failed_run).state_path.exists()
+
+
 def test_ui_uses_live_agent_graph_and_places_completed_action_in_sidebar() -> None:
     assert 'id="execution-card"' in HTML
     assert 'id="agent-graph"' in HTML
@@ -509,6 +539,7 @@ def test_ui_uses_live_agent_graph_and_places_completed_action_in_sidebar() -> No
     action = HTML.index('id="completed-actions"')
     sidebar_end = HTML.index("</aside>", clients)
     assert clients < action < sidebar_end
+    assert "'COMPLETED','FAILED'" in HTML
 
 
 def test_site_agent_retries_adapter_that_uses_a_derived_field_as_source() -> None:
@@ -602,3 +633,200 @@ def test_site_agent_returns_incomplete_assessment_after_two_invalid_adapters() -
     assert result["data_adapter"]["status"] == "incomplete"
     assert result["data_adapter"]["fields"] == {}
     assert "failed boundary verification" in result["unavailable_concepts"][0]["reason"]
+
+
+def test_local_profile_suppresses_rare_values_and_verifies_generated_adapter() -> None:
+    data = pd.DataFrame(
+        {
+            "survival_years": [float(index) for index in range(20)],
+            "vital_status": ["Living"] * 12 + ["Dead"] * 7 + ["Rare status"],
+        }
+    )
+    catalog = {
+        "clinical_features": {"survival_years": {}, "vital_status": {}},
+        "schema_fields": list(data.columns),
+    }
+    profile = build_local_profile(data, catalog, "Compare overall survival", min_cell_count=5)
+
+    categories = profile["fields"]["vital_status"]["observed_categories"]
+    assert not any(item["value"] == "Rare status" for item in categories)
+    assert any(item["value"] == "__SUPPRESSED_CATEGORIES__" for item in categories)
+    adapter = {
+        "fields": {
+            "time_months": {"source": "survival_years", "value_map": {}, "multiply": 12.0},
+            "event_death": {
+                "source": "vital_status",
+                "value_map": {"Dead": 1, "__OTHER_NON_MISSING__": 0},
+                "multiply": 1.0,
+            },
+        }
+    }
+    verify_adapter_locally(adapter, data, profile["digest"])
+    assert adapter["verification"]["status"] == "verified_against_local_profile"
+
+
+def test_site_scoped_analysis_is_only_checked_executed_and_pooled_at_target(tmp_path: Path) -> None:
+    payload = _contract(approved=False).payload
+    payload["analyses"] = [{**payload["analyses"][0], "site_id": "site_one"}]
+    payload["approved_tools"] = ["federated_histogram"]
+    proposal = AnalysisContract.parse(payload)
+    other_catalog = {"site_id": "site_two", "schema_fields": []}
+    report = assess_feasibility(proposal, [other_catalog])
+    assert report["sites"][0]["targeted_analysis_count"] == 0
+    assert report["sites"][0]["support_status"] == "not_targeted"
+    assert report["sites"][0]["all_requested_analyses_supported"] is True
+    assert report["federation_ready"] is False
+    assert report["sites"][0]["fedready"] is False
+
+    payload["approval"] = {"status": "approved", "contract_digest": proposal.approval_digest}
+    result = SiteExecutor(_site(tmp_path)).execute(AnalysisContract.parse(payload))
+    assert [item["analysis_id"] for item in result["analyses"]] == ["numeric_distribution"]
+    pooled = aggregate_site_results([result, {"site_id": "site_two", "analyses": []}], payload)
+    assert len(pooled["analyses"]) == 1
+
+
+def test_human_approved_dynamic_pairwise_algorithm_executes_locally_and_pools(tmp_path: Path) -> None:
+    local_code = '''def run_local(data, analysis, min_cell_count):
+    fields = analysis["fields"]
+    pairs = []
+    for i in range(len(fields)):
+        for j in range(i, len(fields)):
+            x = fields[i]
+            y = fields[j]
+            left = pd.to_numeric(data[x], errors="coerce")
+            right = pd.to_numeric(data[y], errors="coerce")
+            frame = pd.DataFrame({"x": left, "y": right}).dropna()
+            n = int(len(frame))
+            if n < min_cell_count:
+                pairs.append({"x": x, "y": y, "status": "suppressed", "n": None})
+            else:
+                pairs.append({"x": x, "y": y, "status": "ok", "n": n, "sum_x": float(frame["x"].sum()), "sum_y": float(frame["y"].sum()), "sum_x2": float((frame["x"] * frame["x"]).sum()), "sum_y2": float((frame["y"] * frame["y"]).sum()), "sum_xy": float((frame["x"] * frame["y"]).sum())})
+    return {"schema_version": "biobank.dynamic_local_output.v1", "status": "ok", "pairs": pairs}
+'''
+    server_code = '''def run_server(outputs, analysis):
+    fields = analysis["fields"]
+    matrices = {}
+    pooled = {}
+    for output in outputs:
+        matrix = {}
+        for field in fields:
+            matrix[field] = {}
+        for item in output.get("pairs", []):
+            if item.get("status") != "ok":
+                continue
+            n = item["n"]
+            numerator = n * item["sum_xy"] - item["sum_x"] * item["sum_y"]
+            left = n * item["sum_x2"] - item["sum_x"] * item["sum_x"]
+            right = n * item["sum_y2"] - item["sum_y"] * item["sum_y"]
+            correlation = numerator / math.sqrt(left * right) if left > 0 and right > 0 else 1.0 if item["x"] == item["y"] else None
+            matrix[item["x"]][item["y"]] = correlation
+            matrix[item["y"]][item["x"]] = correlation
+            key = item["x"] + "|" + item["y"]
+            if key not in pooled:
+                pooled[key] = {"x": item["x"], "y": item["y"], "n": 0, "sum_x": 0.0, "sum_y": 0.0, "sum_x2": 0.0, "sum_y2": 0.0, "sum_xy": 0.0}
+            for name in ["n", "sum_x", "sum_y", "sum_x2", "sum_y2", "sum_xy"]:
+                pooled[key][name] = pooled[key][name] + item[name]
+        matrices[output["site_id"]] = matrix
+    matrix = {}
+    for field in fields:
+        matrix[field] = {}
+    for item in pooled.values():
+        n = item["n"]
+        numerator = n * item["sum_xy"] - item["sum_x"] * item["sum_y"]
+        left = n * item["sum_x2"] - item["sum_x"] * item["sum_x"]
+        right = n * item["sum_y2"] - item["sum_y"] * item["sum_y"]
+        correlation = numerator / math.sqrt(left * right) if left > 0 and right > 0 else 1.0 if item["x"] == item["y"] else None
+        matrix[item["x"]][item["y"]] = correlation
+        matrix[item["y"]][item["x"]] = correlation
+    matrices["federated"] = matrix
+    return {"schema_version": "biobank.dynamic_server_output.v1", "status": "ok", "matrices": matrices, "method": "Pearson correlation from pooled pairwise sufficient statistics"}
+'''
+    payload = {
+        "schema_version": "biobank.analysis_contract.v2",
+        "study_id": "dynamic-correlation",
+        "question": "Calculate a correlation matrix",
+        "training_allowed": False,
+        "cohorts": [],
+        "site_harmonization": {},
+        "dynamic_tools": [{
+            "name": "dynamic_pairwise_correlation",
+            "version": 1,
+            "description": "Pairwise-complete Pearson correlation",
+            "required_parameters": ["fields"],
+            "local_output": "pairwise sufficient statistics",
+            "server_operation": "sum pairwise moments and calculate correlations",
+            "local_code": local_code,
+            "server_code": server_code,
+        }],
+        "approved_tools": ["dynamic_pairwise_correlation"],
+        "privacy": {"min_cell_count": 5, "forbidden_outputs": ["row_level"]},
+        "analyses": [{
+            "analysis_id": "correlations",
+            "tool": "dynamic_pairwise_correlation",
+            "fields": ["record_id", "measurement"],
+        }],
+        "unavailable_requests": [],
+        "approval": {"status": "proposed"},
+    }
+    proposal = AnalysisContract.parse(payload)
+    payload["approval"] = {"status": "approved", "contract_digest": proposal.approval_digest}
+    approved = AnalysisContract.parse(payload)
+
+    local = SiteExecutor(_site(tmp_path)).execute(approved)
+    pooled = aggregate_site_results([local], approved.payload)
+
+    matrix = pooled["analyses"][0]["output"]["matrices"]["federated"]
+    assert matrix["record_id"]["measurement"] == pytest.approx(1.0)
+    assert local["patient_rows_exported"] == 0
+
+
+def test_dynamic_tool_rejects_imports() -> None:
+    payload = _contract(approved=False).payload
+    payload["dynamic_tools"] = [{
+        "name": "dynamic_bad",
+        "description": "unsafe",
+        "required_parameters": ["fields"],
+        "local_code": "import os\ndef run_local(data, analysis, min_cell_count):\n    return {}",
+        "server_code": "def run_server(outputs, analysis):\n    return {}",
+    }]
+    with pytest.raises(ValueError, match="only def run_local|forbidden syntax"):
+        AnalysisContract.parse(payload)
+
+
+def test_server_planner_allows_two_schema_repair_attempts(tmp_path: Path) -> None:
+    invalid = {
+        "schema_version": "biobank.analysis_contract.v2",
+        "study_id": "repair-km",
+        "question": "Compare survival",
+        "training_allowed": False,
+        "cohorts": [{"name": "all", "predicate": {"not": {"is_missing": {"field": "group"}}}}],
+        "site_harmonization": {},
+        "approved_tools": ["federated_kaplan_meier"],
+        "privacy": {"min_cell_count": 5, "forbidden_outputs": ["row_level"]},
+        "analyses": [{
+            "analysis_id": "survival",
+            "tool": "federated_kaplan_meier",
+            "time_field": "time",
+            "event": "event",
+            "group_by": "group",
+            "time_bins": [0, 12, 24],
+        }],
+        "unavailable_requests": [],
+        "approval": {"status": "proposed"},
+    }
+    valid = json.loads(json.dumps(invalid))
+    valid["analyses"][0]["event"] = {"field": "event", "values": [1]}
+
+    class RepairingPlanner(CodexPlanner):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_json(self, prompt: str, work_dir: Path) -> dict:
+            self.calls += 1
+            return invalid if self.calls < 3 else valid
+
+    planner = RepairingPlanner()
+    contract = planner.plan("Compare survival", [], tmp_path)
+
+    assert planner.calls == 3
+    assert contract.payload["analyses"][0]["event"]["values"] == [1]

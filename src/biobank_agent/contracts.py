@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from biobank_agent.tools.registry import tool_names, validate_analysis
+from biobank_agent.tools.dynamic import dynamic_manifests, validate_dynamic_tools
+from biobank_agent.tools.registry import TOOL_MANIFESTS
 
 APPROVED_TOOLS = tool_names()
 
@@ -66,8 +68,10 @@ class AnalysisContract:
         privacy = value.get("privacy")
         if not isinstance(privacy, dict) or int(privacy.get("min_cell_count", 0)) < 5:
             raise ValueError("Contract requires privacy.min_cell_count >= 5")
+        dynamic_tools = validate_dynamic_tools(value.get("dynamic_tools", []))
+        manifests = {**TOOL_MANIFESTS, **dynamic_manifests(dynamic_tools)}
         tools = set(value.get("approved_tools", []))
-        unknown_tools = tools - APPROVED_TOOLS
+        unknown_tools = tools - set(manifests)
         if unknown_tools:
             raise ValueError(f"Tools are not approved: {sorted(unknown_tools)}")
         analyses = value.get("analyses")
@@ -78,11 +82,15 @@ class AnalysisContract:
         for item in analyses:
             if not isinstance(item, dict) or item.get("tool") not in tools:
                 raise ValueError("Every analysis must name an approved tool")
-            validate_analysis(item)
+            validate_analysis(item, manifests)
         cohorts = value.get("cohorts")
         if not isinstance(cohorts, list):
             raise ValueError("Contract cohorts must be a list")
-        if analyses and not cohorts:
+        cohort_required = any(
+            "cohorts" in manifests[item["tool"]].get("required_parameters", []) or item.get("subset_cohort")
+            for item in analyses
+        )
+        if cohort_required and not cohorts:
             raise ValueError("Executable analyses require declarative cohort definitions")
         names = [item.get("name") for item in cohorts if isinstance(item, dict)]
         if len(names) != len(cohorts) or any(not isinstance(name, str) or not name.strip() for name in names):

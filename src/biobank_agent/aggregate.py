@@ -5,16 +5,22 @@ from __future__ import annotations
 from typing import Any
 
 from biobank_agent.tools.server import aggregate_tool
+from biobank_agent.tools.dynamic import validate_dynamic_tools
 
 
 def aggregate_site_results(results: list[dict[str, Any]], contract: dict[str, Any] | None = None) -> dict[str, Any]:
     if contract is None:
         raise ValueError("The approved contract is required to aggregate named analyses")
+    dynamic_tools = validate_dynamic_tools(contract.get("dynamic_tools", []))
     pooled = []
     for index, analysis in enumerate(contract["analyses"]):
         analysis_id = analysis.get("analysis_id", f"analysis_{index + 1}")
         outputs = []
-        for result in results:
+        target_site = analysis.get("site_id")
+        expected_results = [result for result in results if not isinstance(target_site, str) or result.get("site_id") == target_site]
+        if isinstance(target_site, str) and not expected_results:
+            raise ValueError(f"Target site {target_site} did not return a result for {analysis_id}")
+        for result in expected_results:
             matching = [item for item in result["analyses"] if item["analysis_id"] == analysis_id]
             if len(matching) != 1:
                 raise ValueError(f"Site {result.get('site_id')} returned {len(matching)} outputs for {analysis_id}")
@@ -24,7 +30,7 @@ def aggregate_site_results(results: list[dict[str, Any]], contract: dict[str, An
                 "analysis_id": analysis_id,
                 "tool": analysis["tool"],
                 "specification": analysis,
-                "output": aggregate_tool(analysis, outputs),
+                "output": aggregate_tool(analysis, outputs, dynamic_tools),
             }
         )
     return {

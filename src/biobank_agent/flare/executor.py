@@ -9,6 +9,7 @@ import pandas as pd
 
 from biobank_agent.contracts import AnalysisContract
 from biobank_agent.flare import ANALYSIS_TASK, CATALOG_TASK, PROGRESS_TOPIC
+from biobank_agent.local_profile import build_local_profile
 from biobank_agent.site_agent import CodexSiteAgent
 from biobank_agent.site import SiteExecutor
 
@@ -45,23 +46,24 @@ class BiobankSiteExecutor(Executor):
             site_dir = Path(self.site_dir)
             if task_name == CATALOG_TASK:
                 self._emit_progress(fl_ctx, "catalog_started")
-                # Read schema and declared mapping metadata, never patient rows or values.
+                # Profile locally; only disclosure-controlled evidence reaches Codex/server.
                 catalog = json.loads((site_dir / "catalog.json").read_text(encoding="utf-8"))
-                catalog["schema_fields"] = list(pd.read_csv(site_dir / "data.csv", nrows=0).columns)
-                mappings_path = site_dir / "mappings.yaml"
-                catalog["declared_mappings_yaml"] = (
-                    mappings_path.read_text(encoding="utf-8") if mappings_path.exists() else ""
-                )
+                local_data = pd.read_csv(site_dir / "data.csv", low_memory=False)
+                catalog["schema_fields"] = list(local_data.columns)
                 request = shareable.get(PAYLOAD_KEY) or {}
                 question = str(request.get("question", "")).strip()
                 if not question:
                     return make_reply(ReturnCode.BAD_TASK_DATA)
                 self._emit_progress(fl_ctx, "site_planning_started")
+                local_profile = build_local_profile(local_data, catalog, question)
                 catalog["site_agent_assessment"] = CodexSiteAgent().assess(
                     question=question,
                     catalog=catalog,
-                    mappings_yaml=catalog["declared_mappings_yaml"],
+                    mappings_yaml="",
+                    local_profile=local_profile,
+                    local_data=local_data,
                 )
+                catalog["local_profile_summary"] = local_profile
                 self._emit_progress(fl_ctx, "site_planning_completed")
                 self._emit_progress(fl_ctx, "catalog_completed")
                 return Shareable({PAYLOAD_KEY: {"schema_version": "biobank.catalog_response.v1", "catalog": catalog}})

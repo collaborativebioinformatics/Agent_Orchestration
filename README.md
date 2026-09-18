@@ -1,49 +1,375 @@
-# Agent Genie 
+# AgentGenie
 
-## How to Use
-
-Agent is a web user that gives the researcher simultaneous access to multiple biobank sites for scientific analysis without required expertise in federated computing. Biobank connection must be authorised to the local server or institution before initial use. A session begins when the user is prompted to select the preferred biobanks for analysis and enter a scientific question in natural language (Figure 1). The description including statistical methods and data stratification is entered to guide the desired output results, plots, and tables. Throughout the session the user can follow a live workflow of the NVIDIA FLARE events between the global server and local sites without viewing access to patient data. The interface displays a review analysis with the scientific question with the cohorts available within privacy limits and feasibility status of each biobank site for data harmonisation. The user is prompted to revise the scientific question with the provided server-agent recommendation. The approved plan is dispatched to the local sites. The session concludes with a study summary including final results and a Report summarizing the federated analysis concluding the search. The user can save the analysis results and prompt the interface with a new study question while maintaining the biobank client connections.
-
-
-![UI](AgentGenie/docs/demo-preview.png)
-
-Figure 1. Agent web user interface at the start of a session with the live agent workflow.
-
-## How to Build
-Agent Genie is a federated AI system that uses a controller-executor pattern orchestrated by NVIDIA FLARE (Federated Learning Application Runtime Environment) [NVIDIA Corporation] (Figure 2). The global server agent acted as the research controller while each local site server acted as an executor within the biobank environment. A shared schema enables communication between all of the system components so that a response has the same structure. The global agent workflow consists of two phases: the discovery phase and the analysis phase. In the discovery phase, NVIDIA FLARE sends a task to each local site.The return information is collected into a catalogue service for the creation of a federated catalogue that holds shared variables across each biobank site and privacy-protected metadata. A harmoniser maps canonical variable names to the local variables reported from each biobank by the corresponding local site. In the analysis phase, the natural language user prompt is structured into an analytical plan by the global agent. The plan is checked against governance regulations by the policy layer to determine biobank eligibility in the federated search. Each site agent executes the analytical plan received from NVIDIA FLARE in the local environment. The contract contains structured specification parameters including tool, cohort, event, grouping, and time metrics that each site can map to local data columns. After local analysis, aggregated results are returned to the global agent via NVIDIA FLARE to ensure patient-level data stays within its respective biobank.
-
-
-![End-to-end orchestration](assets/biobank-system-design.png)
-
-Fig 2. End-to-end orchestration of Agent by NVIDIA FLARE. The 1) research question is translated by the server agent (NVIDIA FLARE controller) into an 2) analysis contract to be 3) executed by local site agent (NVIDIA FLARE executor) at each biobank. Next 4) aggregated results are returned and pooled for researcher feedback 5) the controller- executor-controller loop is repeated until the plan is approved by the user. 
+AgentGenie gives a researcher one web interface for asking natural-language
+questions across authorized biobank sites without requiring expertise in
+federated computing. The interface exposes live NVIDIA FLARE workflow status,
+site feasibility, the proposed analysis contract, the mandatory human decision,
+and the final aggregate-only report without exposing patient-level data.
 
 ## Federated biobank workflow
 
 This design illustrates privacy-preserving, agentic analysis across federated biobanks. It separates central coordination from local data access so that multiple institutions can contribute to a shared analysis without exchanging patient-level records.
 
-![Agentic data analysis across federated biobanks](assets/biobank-agentic-workflow.png)
+![AgentGenie system design: NVFlare-orchestrated federated biobank analysis](assets/biobank-system-design.png)
 
 ### How the workflow operates
 
-1. **Researcher approval:** The researcher poses a scientific question and selects the tools and algorithms that may be used. This approved registry becomes an allowlist that travels with the analysis contract.
-2. **Server orchestration:** The server agent identifies eligible biobanks, decomposes the question into site-level tasks, and fixes the statistical design before execution begins.
-3. **Analysis contract:** Each site receives a signed specification covering the cohort definition, variables, model, output granularity, disclosure rules, and approved tools.
-4. **Local data preparation:** Behind each biobank's firewall, a site agent discovers eligible records and harmonizes local schemas, units, and coding systems to the agreed data model.
-5. **Local analysis:** The site agent runs only allowlisted tools and applies disclosure controls before releasing any output.
-6. **Aggregate analysis:** The server agent pools the returned coefficients, standard errors, counts, and other permitted aggregates; performs meta-analysis and cross-site quality checks; and drafts findings with provenance.
-7. **Human review and refinement:** Results return to the researcher for review. Quality issues or heterogeneous results can trigger a feedback loop in which the server agent refines the design and issues a new contract.
+1. **Question:** The researcher submits a scientific question and consents to site-local, disclosure-controlled adapter planning. The published registry supplies common algorithms; when it is insufficient, agents may propose a task-neutral dynamic implementation for explicit source-code review and approval.
+2. **Orchestrate and contract:** The server agent coordinates the sites, combines their metadata-only proposals, drafts the typed analysis contract, and sends the applicable task and contract to each site.
+3. **Read and work in place:** Before approval, each site agent generates an adapter from its CSV header and a disclosure-controlled local profile; pre-supplied mapping files are not consulted. A deterministic boundary verifier checks safety and structural consistency but never creates or substitutes mapping semantics. After approval, the site applies the digest-bound agent-generated adapter, harmonizes local data, and runs either a registered tool or the exact agent-generated implementation included in the approved contract. Patient rows never leave the biobank or enter a Codex prompt.
+4. **Return and pool aggregates:** Site agents return only disclosure-controlled aggregates. The server agent validates and pools them, performs cross-site checks, and renders the report and figures.
+5. **Inspect, comment, and approve:** The researcher reviews the server agent's concise proposal before execution and the aggregate report after execution. The researcher may approve, reject, or add guidance; revision repeats steps 2–5 until the analysis contract is acceptable. Approval is required even when every site reports full support.
+
+Once the review loop converges, the server agent **composes and runs the federated analysis** using the approved contract.
 
 ### Trust and data boundaries
 
 Solid green arrows represent tasks, contracts, and approved tools travelling from the coordinator to each site. Dashed arrows represent aggregate-only results returning to the server. Patient-level records remain inside their source biobank, and biobanks never communicate directly with one another.
 
-![Communication between global server and local server nodes](assets/federated_cox_server_site_orchestration.png)
+## Analysis-only prototype
 
-Each local server node performs quality control and model fitting while the global server agent collects site results. Summary statistics are displayed on the UI and patient data is never revealed.
+This repository includes a runnable adaptation of the medical-imaging FedReady
+pattern for tabular clinical and gene data. Codex is the only generative-agent
+backend. Client-side Codex agents propose local adapters and assess support from
+site-visible metadata. A server-side Codex agent turns those proposals into a
+typed analysis contract and a concise human recommendation. Deterministic,
+registered or approval-bound generated statistical tools execute only the approved contract. There is no
+model training.
 
-The runnable federated-analysis implementation developed here is packaged in [`AgentGenie/`](AgentGenie/README.md).
+The workflow deliberately stops before running the requested analysis. During
+discovery, each client may inspect rows locally to derive a disclosure-controlled
+profile, but neither rows nor rare values leave the boundary or reach Codex. The researcher
+first sees the proposed cohort and fields, verified local adapter status, selected tools,
+disclosure rules, unavailable concepts, and the server agent's recommendation.
+The recommendation either presents an approvable contract or concise revision
+points. Only a separate, digest-bound human decision creates an executable
+contract; the headless `run` command rejects a proposed contract.
+
+### General-purpose server tool registry
+
+The statistical runtime contains no breast-cancer, TNBC, receptor, treatment,
+or fixed-column logic. The server publishes a versioned registry of statistical
+primitives to Codex:
+
+- `federated_histogram`: fixed-bin numeric distributions and binned median intervals;
+- `categorical_contingency`: pooled category-by-cohort tables and chi-square tests;
+- `federated_kaplan_meier`: pooled event/censor histograms and product-limit curves;
+- `numeric_sufficient_statistics`: pooled count, sum, sum-of-squares, mean, and SD; and
+- `missingness_summary`: pooled observed and missing counts.
+
+The Kaplan–Meier primitive generalizes the time-binned design in NVFlare's
+Kaplan–Meier example. It accepts contract-defined time fields, event encodings,
+subsets, grouping variables, and time bins; it knows nothing about a particular
+disease or endpoint.
+
+The registry is a preferred toolbox, not a completeness assumption. If a valid
+question requires an unavailable algorithm, client agents describe the required
+local aggregates and server computation, and the server agent may author a
+`dynamic_*` implementation. The proposed contract contains the complete local
+reducer and server aggregator source. The UI labels it **AGENT-GENERATED** and
+lets the researcher inspect both before approval. The approval digest binds the
+source, parameters, adapters, and privacy rules; changing any of them invalidates
+the decision.
+
+Dynamic local code receives only the explicitly approved analysis fields, not
+the complete site table. Imports, filesystem and network access, subprocesses,
+reflection, and private/dunder attribute access are rejected. Its result must be
+finite aggregate JSON, obey the minimum-cell rule, and fit the payload limit.
+Dynamic server code receives only those client aggregates. The fixed registry
+remains preferable for repeated and externally validated methods, while dynamic
+tools cover one-off analyses without silently treating an unregistered method as
+prevalidated.
+
+For every new user question, Codex must create a proposed v2 contract containing:
+
+- named cohorts expressed with the safe predicate DSL (`all`, `any`, `not`,
+  equality, membership, numeric comparisons, and missingness);
+- per-site canonical field mappings, categorical value maps, and unit multipliers;
+- selected registry tools or complete human-reviewable dynamic implementations with all required parameters;
+- disclosure controls and requested-but-unavailable concepts; and
+- an unapproved status for human review.
+
+Sites expose only catalog metadata, CSV column headers, disclosure-controlled
+profile summaries, and the site agent's structured proposal during discovery.
+Pre-supplied mapping files are not included in site-agent planning and there is
+no deterministic mapping fallback. The server agent promotes only locally verified generated
+adapters into the proposed contract, assesses cross-site feasibility, and
+summarizes only the key decisions for the researcher while retaining the full
+digest-bound review as an audit artifact. Once approved, the same generic local
+and server implementations execute the task-specific contract. Registry
+definitions are in `src/biobank_agent/tools/registry.py`; cohort evaluation,
+harmonization, local aggregation, and server pooling are separate modules in
+the same directory.
+
+### TNBC demonstration contract
+
+The included proposal compares triple-negative breast cancer (TNBC) with
+non-TNBC by age and menopause, then describes overall survival among TNBC
+patients by surgery, chemotherapy, hormone therapy, and radiotherapy. It also
+pools sufficient statistics for a small gene panel. TNBC is explicitly defined
+as ER-negative, PR-negative, and HER2-negative.
+
+The current data do **not** contain weight, ethnicity/race, or a
+progression/recurrence endpoint. The workflow reports those requests as
+unsupported. It does not infer ethnicity and does not relabel overall survival
+as progression-free survival. Site B's survival years are converted to months,
+and Site C's binary ER coding is mapped to the common receptor representation.
+Site C has clinical metadata but no gene-expression panel, so it participates
+in clinical analyses only.
+
+The TNBC JSON is a task-specific example produced on top of the general
+registry. It supplies receptor-based cohort predicates, site-specific coding
+and survival-unit mappings, selected fields, and analysis parameters. None of
+those choices are embedded in the tools. Survival comparisons are observational
+and unadjusted; they cannot establish which treatment causes longer survival.
+
+### Run the approval workflow
+
+From the repository root, install the Python 3.9+ package. An authenticated Codex CLI is needed when
+planning a new free-form question.
+
+```bash
+python3 -m pip install -e .
+```
+
+#### Recommended: one study console for question and approval
+
+The local web console is the primary human interface. Start an NVFlare run with
+`question=None`; the Controller enters `WAITING_FOR_QUESTION` instead of reading
+a prompt file or command-line string:
+
+```python
+from biobank_agent.flare.job import run_biobank_simulation
+
+run_biobank_simulation(
+    workspace_root="workspace",
+    sites_root="/path/to/sites",
+    question=None,
+    output_dir="runs",
+    session_id="study-001",
+)
+```
+
+In another terminal, point the study console at that same run directory. Supplying
+the site and workspace locations enables the completed screen's **Start New** button:
+
+```bash
+biobank-agent serve-ui runs/study-001 \
+  --sites-root /path/to/sites \
+  --workspace workspace \
+  --output-root runs
+```
+
+Open `http://127.0.0.1:8765`. The console provides the complete human flow:
+
+1. enter the initial scientific question and researcher identity;
+2. see connected clients and follow discovery, local adapter planning, contract
+   planning, dispatch, local analysis, and aggregate return in the live graph;
+3. review readable cohort predicates, harmonization-dependent feasibility,
+   selected general-purpose tools and parameters, privacy rules, and unavailable
+   requests;
+4. review the server agent's concise recommendation;
+5. approve or reject an executable contract, or confirm a proposed revision and
+   optionally add manual scientific guidance for the next planning pass;
+6. review the final figures and aggregate report together with site-level total
+   and feasible-row counts, disclosure-controlled values, and a one-sentence
+   explanation of exclusions; and
+7. download the implementation benchmark bundle or use **Start New** to archive
+   the current session and launch a clean study.
+
+The human gate is never skipped. Full site support removes the need for another
+revision, but the researcher must still approve the final contract before any
+task capable of reading patient rows is dispatched.
+
+The browser never changes Controller state directly. It writes typed user-input
+and decision artifacts; the Controller validates their schema, workflow state,
+and proposal digest before proceeding. The server binds only to loopback,
+requires a per-process request token, applies a restrictive content security
+policy, and exposes no patient data. JSON remains the durable audit format but
+is no longer the researcher-facing interface.
+
+#### Live status reporting
+
+Status reporting uses a separate, non-sensitive control path:
+
+1. On run start and completion, and around catalog inspection, site-agent
+   planning, and approved analysis, each NVFlare Executor sends a best-effort
+   auxiliary message containing only an allowlisted progress code.
+2. The Controller verifies that the sender is one of the configured clients,
+   maps the code to a safe phase and message, and appends it to
+   `server/workflow_events.json`. Server-side planning, review synthesis,
+   approval, dispatch, aggregation, failure, and completion events are written
+   through the same audit stream.
+3. `server/participants.json` supplies the expected client identities. Connect
+   and disconnect events determine the **Connected clients** count.
+4. The browser polls `/api/study` once per second and renders a compact dynamic
+   graph. Arrows show task dispatch or aggregate return. A site agent doing local
+   work is illuminated, and the server agent is illuminated specifically while
+   it is building the analysis contract; routine coordination remains neutral.
+
+These events contain phase, actor, site identifier, status, timestamp, and a
+safe message. They never contain patient values, row payloads, or analysis
+results. Auxiliary reporting is optional and must not block the federated task;
+the durable Controller state remains authoritative.
+
+The commands below remain useful as headless/automation alternatives.
+
+Ask Codex to draft a proposal from catalogs only (no patient rows are opened):
+
+```bash
+biobank-agent plan \
+  --question "Compare TNBC with non-TNBC and describe TNBC survival by treatment" \
+  --sites-root /path/to/sites \
+  --output runs/tnbc.proposed.json
+```
+
+Or inspect the supplied reproducible proposal:
+
+```bash
+biobank-agent review examples/tnbc_contract.proposed.json \
+  --sites-root /path/to/sites
+```
+
+After the researcher agrees to the displayed tools and feasibility report,
+record approval and run that contract:
+
+```bash
+biobank-agent approve examples/tnbc_contract.proposed.json \
+  --by researcher \
+  --output runs/tnbc.approved.json
+
+biobank-agent run \
+  --contract runs/tnbc.approved.json \
+  --sites-root /path/to/sites \
+  --output runs/tnbc
+```
+
+Output contains one aggregate-only JSON payload per site, a pooled server
+payload, a Markdown report, and SVG figures. Raw rows and patient identifiers
+are never written to the run directory.
+
+### Implementation benchmark bundle
+
+After a successful NVFlare study, AgentGenie automatically creates
+`server/benchmark_bundle/` and `server/benchmark_bundle.zip` inside that
+session's run directory. The completed-study UI exposes the ZIP as **Download
+implementation benchmark bundle**.
+
+Each bundle is scoped to one completed session and never combines artifacts
+from older, failed, rejected, or active runs. For retro-inspection, use the
+latest successful session's bundle.
+
+The bundle is designed for comparison with an implementation prepared by a
+human data scientist. It contains:
+
+- one record per site with the agent-proposed local adapter and the
+  contract-authorized cleaning/harmonization mapping;
+- the approved analysis contract, feasibility report, human decision, and
+  tool registry;
+- the generated NVFlare job metadata, server/client configurations, and exact
+  deployed analysis code;
+- aggregate-only results, report, and figures; and
+- a manifest plus SHA-256 checksums.
+
+Site CSVs, patient-level data, and catalog snapshots are explicitly excluded.
+
+### NVFlare Controller workflow
+
+The production-shaped path lives under `biobank_agent.flare`. Its
+`BiobankAnalysisController` owns the state transition rather than relying on a
+wrapper script:
+
+```text
+STARTING -> WAITING_FOR_QUESTION -> DISCOVERING -> PLANNING
+                                      ^              |
+                                      |              v
+                                      +---- REVISE -- WAITING_FOR_APPROVAL
+                                                        |
+                                                     APPROVED
+                                                        |
+                                                        v
+                                             DISPATCHING_ANALYSIS
+                                                        |
+                                                        v
+                                                     COMPLETED
+
+Any active phase may terminate as FAILED, REJECTED, EXPIRED, or ABORTED.
+```
+
+During discovery the Controller broadcasts `biobank_catalog_discovery`; its
+Executors read each site's redacted `catalog.json`, CSV schema, and local data
+to build a minimum-cell-controlled profile. A local Codex site agent generates
+an adapter from that profile, and a deterministic local verifier checks it
+against the source data. Only the redacted profile and verified adapter—not
+patient rows—are returned. The Controller then asks the
+server Codex agent for a contract (or loads a reproducible unapproved proposal),
+validates the site proposals, writes the proposal and feasibility report, and
+synthesizes a concise human recommendation before entering
+`WAITING_FOR_APPROVAL`. No requested statistical analysis has run at that point,
+and no patient rows or unsuppressed rare values have crossed a site boundary.
+
+If revision is recommended, the UI shows only the concise key points. The full
+server-authored guidance is retained under the hood and bound by its digest.
+When the researcher confirms it, any additional manual guidance is appended,
+the current attempt is archived, and all agents run another planning pass. If
+the resulting proposal is supported, the workflow returns to the mandatory
+approval gate without requesting an unnecessary further revision.
+
+While the NVFlare run waits, the researcher reviews those artifacts in another
+terminal and records a decision:
+
+```bash
+biobank-agent approve-run runs/<session-id> \
+  --decision approve \
+  --by researcher
+```
+
+The command displays the cohort, proposed tools, site support, and unavailable
+requests, then requires the researcher to type `APPROVE`. `--yes` is available
+for an explicitly authorized non-interactive workflow. Rejection uses
+`--decision reject --reason "..."`.
+
+The approval contains the published proposal digest. The Controller validates
+that digest and the complete client/server review bundle, creates the immutable
+approved contract, and only then broadcasts `biobank_approved_analysis`. Any
+proposal edit, stale decision, timeout, rejection, or abort prevents analysis
+dispatch. Site Executors independently validate the approval and contract
+digest before opening their CSV and return only disclosure-controlled aggregate
+payloads. The server pools those results, renders the final report and curves,
+and records how many local rows were feasible; small site counts may be shown as
+**Minimal** rather than disclosed exactly.
+
+Build a job in Python using the current NVFlare `FedJob`/`Recipe` pattern:
+
+```python
+from biobank_agent.flare.job import build_biobank_recipe
+
+recipe, clients = build_biobank_recipe(
+    sites_root="/path/to/sites",
+    question="Compare TNBC with non-TNBC and describe TNBC survival by treatment",
+    output_dir="runs",
+    session_id="tnbc-study-001",
+    proposal_path="examples/tnbc_contract.proposed.json",  # omit to use Codex
+)
+```
+
+Install against an NVFlare 2.9 environment with `pip install -e '.[nvflare]'`.
+The Controller, client Executor, approval state machine, and job builder are in
+`src/biobank_agent/flare/`.
+
+### Timing-compressed workflow demo
+
+[![Watch the AgentGenie workflow demo](docs/demo-preview.png)](demo-video/agentgenie-workflow-demo-clean-final.webm)
+
+Click the preview to watch the AgentGenie workflow video. It replays a real
+analysis contract and aggregate result with compressed agent wait times and is
+visibly labelled as a recorded replay. The demonstration includes the initial
+question, client feasibility review, researcher-supplied revision guidance, a
+supported second pass, human approval, disclosure-controlled feasible-case
+reporting, and the final Kaplan–Meier curve.
 
 ## Team
+
 - Cecilie
 - Ziyue
 - Maya

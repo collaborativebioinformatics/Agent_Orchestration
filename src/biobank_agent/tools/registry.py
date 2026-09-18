@@ -55,11 +55,14 @@ def tool_names() -> set[str]:
     return set(TOOL_MANIFESTS)
 
 
-def validate_analysis(analysis: dict[str, Any]) -> None:
+def validate_analysis(
+    analysis: dict[str, Any], manifests: dict[str, dict[str, Any]] | None = None
+) -> None:
+    manifests = manifests or TOOL_MANIFESTS
     name = analysis.get("tool")
-    if name not in TOOL_MANIFESTS:
+    if name not in manifests:
         raise ValueError(f"Tool is not registered: {name}")
-    missing = [key for key in TOOL_MANIFESTS[name]["required_parameters"] if key not in analysis]
+    missing = [key for key in manifests[name]["required_parameters"] if key not in analysis]
     if missing:
         raise ValueError(f"Analysis {name} is missing parameters: {missing}")
     if name == "federated_histogram":

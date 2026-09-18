@@ -1,4 +1,4 @@
-"""Schema-only feasibility review before human approval."""
+"""Feasibility review using client-verified, disclosure-controlled adapters."""
 
 from __future__ import annotations
 
@@ -20,14 +20,21 @@ def promote_verified_site_adapters(
         assessment = catalog.get("site_agent_assessment", {})
         adapter = assessment.get("data_adapter", {}) if isinstance(assessment, dict) else {}
         proposed_fields = adapter.get("fields", {}) if isinstance(adapter, dict) else {}
-        if adapter.get("status") != "ready" or adapter.get("unresolved") or not isinstance(proposed_fields, dict):
+        locally_profiled = bool(catalog.get("local_profile_summary"))
+        locally_verified = adapter.get("verification", {}).get("status") == "verified_against_local_profile"
+        if (
+            adapter.get("status") != "ready"
+            or adapter.get("unresolved")
+            or not isinstance(proposed_fields, dict)
+            or (locally_profiled and not locally_verified)
+        ):
             continue
-        promoted = {
-            canonical: copy.deepcopy(proposed_fields[canonical])
-            for canonical in current_fields
-            if canonical in proposed_fields
-        }
-        if set(promoted) == set(current_fields):
+        # Client-local verification is authoritative. Keep only fields selected by
+        # the server contract, but replace their complete specification with the
+        # locally generated adapter rather than preserving planner/YAML mappings.
+        selected = set(current_fields)
+        promoted = {canonical: copy.deepcopy(proposed_fields[canonical]) for canonical in selected if canonical in proposed_fields}
+        if selected and set(promoted) == selected:
             harmonization[site_id]["fields"] = promoted
     return AnalysisContract.parse(payload)
 
@@ -63,6 +70,9 @@ def assess_feasibility(contract: AnalysisContract, catalogs: list[dict[str, Any]
         cohort_fields = _cohort_fields(contract.payload["cohorts"])
         analyses = []
         for index, analysis in enumerate(contract.payload["analyses"]):
+            target_site = analysis.get("site_id")
+            if isinstance(target_site, str) and target_site != site_id:
+                continue
             required = _analysis_fields(analysis) | cohort_fields
             missing = sorted(required - available)
             analyses.append(
@@ -91,17 +101,44 @@ def assess_feasibility(contract: AnalysisContract, catalogs: list[dict[str, Any]
                     "supported_concepts": site_assessment.get("supported_concepts", []),
                     "unavailable_concepts": site_assessment.get("unavailable_concepts", []),
                     "analysis_proposals": site_assessment.get("analysis_proposals", []),
+                    "dynamic_tool_requests": site_assessment.get("dynamic_tool_requests", []),
                 },
-                "all_requested_analyses_supported": bool(analyses)
+                "targeted_analysis_count": len(analyses),
+                "support_status": (
+                    "no_executable_analysis"
+                    if not contract.payload["analyses"]
+                    else "not_targeted"
+                    if not analyses
+                    else "supported"
+                    if all(item["supported"] for item in analyses) and not invalid_mappings
+                    else "partial"
+                ),
+                "all_requested_analyses_supported": bool(contract.payload["analyses"])
                 and all(item["supported"] for item in analyses)
                 and not invalid_mappings,
             }
         )
+    reported_site_ids = {site["site_id"] for site in sites}
+    assigned_targets_present = all(
+        not isinstance(analysis.get("site_id"), str) or analysis["site_id"] in reported_site_ids
+        for analysis in contract.payload["analyses"]
+    )
+    federation_ready = (
+        bool(contract.payload["analyses"])
+        and bool(sites)
+        and assigned_targets_present
+        and all(site["all_requested_analyses_supported"] for site in sites)
+    )
+    for site in sites:
+        site["fedready"] = federation_ready and site["targeted_analysis_count"] > 0
     return {
         "schema_version": "biobank.feasibility_report.v2",
         "study_id": contract.study_id,
-        "schema_only": True,
-        "patient_rows_accessed": False,
+        "federation_ready": federation_ready,
+        "schema_only": False,
+        "review_scope": "client-local disclosure-controlled profiles",
+        "patient_rows_accessed_locally": True,
+        "patient_rows_or_values_shared": False,
         "sites": sites,
         "unavailable_requests": contract.payload.get("unavailable_requests", []),
     }
