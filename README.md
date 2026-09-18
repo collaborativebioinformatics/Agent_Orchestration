@@ -6,6 +6,71 @@ federated computing. The interface exposes live NVIDIA FLARE workflow status,
 site feasibility, the proposed analysis contract, the mandatory human decision,
 and the final aggregate-only report without exposing patient-level data.
 
+### Run the approval workflow
+
+From the repository root, install the Python 3.9+ package. An authenticated Codex CLI is needed when
+planning a new free-form question.
+
+```bash
+python3 -m pip install -e .
+```
+
+#### Recommended: one study console for question and approval
+
+The local web console is the primary human interface. Start an NVFlare run with
+`question=None`; the Controller enters `WAITING_FOR_QUESTION` instead of reading
+a prompt file or command-line string:
+
+```python
+from biobank_agent.flare.job import run_biobank_simulation
+
+run_biobank_simulation(
+    workspace_root="workspace",
+    sites_root="/path/to/sites",
+    question=None,
+    output_dir="runs",
+    session_id="study-001",
+)
+```
+
+In another terminal, point the study console at that same run directory. Supplying
+the site and workspace locations enables the completed screen's **Start New** button:
+
+```bash
+biobank-agent serve-ui runs/study-001 \
+  --sites-root /path/to/sites \
+  --workspace workspace \
+  --output-root runs
+```
+
+Open `http://127.0.0.1:8765`. The console provides the complete human flow:
+
+1. enter the initial scientific question and researcher identity;
+2. see connected clients and follow discovery, local adapter planning, contract
+   planning, dispatch, local analysis, and aggregate return in the live graph;
+3. review readable cohort predicates, harmonization-dependent feasibility,
+   selected general-purpose tools and parameters, privacy rules, and unavailable
+   requests;
+4. review the server agent's concise recommendation;
+5. approve or reject an executable contract, or confirm a proposed revision and
+   optionally add manual scientific guidance for the next planning pass;
+6. review the final figures and aggregate report together with site-level total
+   and feasible-row counts, disclosure-controlled values, and a one-sentence
+   explanation of exclusions; and
+7. download the implementation benchmark bundle or use **Start New** to archive
+   the current session and launch a clean study.
+
+The human gate is never skipped. Full site support removes the need for another
+revision, but the researcher must still approve the final contract before any
+task capable of reading patient rows is dispatched.
+
+The browser never changes Controller state directly. It writes typed user-input
+and decision artifacts; the Controller validates their schema, workflow state,
+and proposal digest before proceeding. The server binds only to loopback,
+requires a per-process request token, applies a restrictive content security
+policy, and exposes no patient data. JSON remains the durable audit format but
+is no longer the researcher-facing interface.
+
 ## Federated biobank workflow
 
 This design illustrates privacy-preserving, agentic analysis across federated biobanks. It separates central coordination from local data access so that multiple institutions can contribute to a shared analysis without exchanging patient-level records.
@@ -122,71 +187,6 @@ registry. It supplies receptor-based cohort predicates, site-specific coding
 and survival-unit mappings, selected fields, and analysis parameters. None of
 those choices are embedded in the tools. Survival comparisons are observational
 and unadjusted; they cannot establish which treatment causes longer survival.
-
-### Run the approval workflow
-
-From the repository root, install the Python 3.9+ package. An authenticated Codex CLI is needed when
-planning a new free-form question.
-
-```bash
-python3 -m pip install -e .
-```
-
-#### Recommended: one study console for question and approval
-
-The local web console is the primary human interface. Start an NVFlare run with
-`question=None`; the Controller enters `WAITING_FOR_QUESTION` instead of reading
-a prompt file or command-line string:
-
-```python
-from biobank_agent.flare.job import run_biobank_simulation
-
-run_biobank_simulation(
-    workspace_root="workspace",
-    sites_root="/path/to/sites",
-    question=None,
-    output_dir="runs",
-    session_id="study-001",
-)
-```
-
-In another terminal, point the study console at that same run directory. Supplying
-the site and workspace locations enables the completed screen's **Start New** button:
-
-```bash
-biobank-agent serve-ui runs/study-001 \
-  --sites-root /path/to/sites \
-  --workspace workspace \
-  --output-root runs
-```
-
-Open `http://127.0.0.1:8765`. The console provides the complete human flow:
-
-1. enter the initial scientific question and researcher identity;
-2. see connected clients and follow discovery, local adapter planning, contract
-   planning, dispatch, local analysis, and aggregate return in the live graph;
-3. review readable cohort predicates, harmonization-dependent feasibility,
-   selected general-purpose tools and parameters, privacy rules, and unavailable
-   requests;
-4. review the server agent's concise recommendation;
-5. approve or reject an executable contract, or confirm a proposed revision and
-   optionally add manual scientific guidance for the next planning pass;
-6. review the final figures and aggregate report together with site-level total
-   and feasible-row counts, disclosure-controlled values, and a one-sentence
-   explanation of exclusions; and
-7. download the implementation benchmark bundle or use **Start New** to archive
-   the current session and launch a clean study.
-
-The human gate is never skipped. Full site support removes the need for another
-revision, but the researcher must still approve the final contract before any
-task capable of reading patient rows is dispatched.
-
-The browser never changes Controller state directly. It writes typed user-input
-and decision artifacts; the Controller validates their schema, workflow state,
-and proposal digest before proceeding. The server binds only to loopback,
-requires a per-process request token, applies a restrictive content security
-policy, and exposes no patient data. JSON remains the durable audit format but
-is no longer the researcher-facing interface.
 
 #### Live status reporting
 
