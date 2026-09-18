@@ -8,13 +8,13 @@ This design illustrates privacy-preserving, agentic analysis across federated bi
 
 ### How the workflow operates
 
-1. **Research question:** The researcher submits a scientific question and consents to catalog-only agent planning. The published tool registry defines the only algorithms that may later be approved.
-2. **Local discovery and proposal:** Each site agent inspects its redacted catalog, declared mappings, and CSV header—never row values—to propose a local data adapter and report which requested analyses it can support.
-3. **Server orchestration:** The server agent combines the site proposals, drafts a typed analysis contract, and produces a concise recommendation for the researcher.
-4. **Human confirmation:** The researcher either approves the exact contract, rejects it, or confirms the server agent's revision points and optionally adds scientific guidance. A revision starts another discovery and planning pass. Approval is required even when every site reports full support.
-5. **Analysis contract:** Each site receives the immutable, digest-bound specification covering the cohort, variables, harmonization, model, output granularity, disclosure rules, and approved tools.
-6. **Local harmonization and analysis:** Behind each biobank's firewall, the site agent applies the approved adapter, runs only allowlisted tools, and enforces disclosure controls before releasing aggregate output.
-7. **Aggregate analysis and review:** The server agent pools the permitted aggregates, renders the report and figures, and returns provenance, feasible-row summaries, and brief exclusion explanations for researcher review.
+1. **Question:** The researcher submits a scientific question and consents to catalog-only agent planning. The published tool registry defines the only algorithms that may later be approved.
+2. **Orchestrate and contract:** The server agent coordinates the sites, combines their metadata-only proposals, drafts the typed analysis contract, and sends the applicable task and contract to each site.
+3. **Read and work in place:** Before approval, each site agent may inspect only its redacted catalog, declared mappings, and CSV header to propose a local adapter. After approval, it applies the digest-bound adapter, harmonizes local data, runs only allowlisted tools, and redacts its output. Patient rows never leave the biobank.
+4. **Return and pool aggregates:** Site agents return only disclosure-controlled aggregates. The server agent validates and pools them, performs cross-site checks, and renders the report and figures.
+5. **Inspect, comment, and approve:** The researcher reviews the server agent's concise proposal before execution and the aggregate report after execution. The researcher may approve, reject, or add guidance; revision repeats steps 2–5 until the analysis contract is acceptable. Approval is required even when every site reports full support.
+
+Once the review loop converges, the server agent **composes and runs the federated analysis** using the approved contract.
 
 ### Trust and data boundaries
 
