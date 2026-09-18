@@ -15,6 +15,7 @@ from biobank_agent.contracts import AnalysisContract
 from biobank_agent.feasibility import assess_feasibility, promote_verified_site_adapters
 from biobank_agent.local_profile import build_local_profile, verify_adapter_locally
 from biobank_agent.flare.approval import ApprovalRejected, HumanApprovalGate, create_human_decision
+from biobank_agent.render import _km_svg
 from biobank_agent.site import SiteExecutor
 from biobank_agent.site_agent import CodexSiteAgent
 from biobank_agent.tools.harmonize import harmonize
@@ -404,6 +405,34 @@ def test_completed_ui_exposes_final_result_and_disclosure_controlled_row_summary
     assert result["artifacts"] == ["survival.svg"]
     assert result["aggregate"]["site_row_summaries"][0]["analysis_row_counts"]["survival"]["rows_used"] == 20
     assert store.result_artifact("report", "survival.svg").name == "survival.svg"
+
+
+def test_kaplan_meier_svg_includes_numeric_axes_and_grid(tmp_path: Path) -> None:
+    destination = tmp_path / "curve.svg"
+    result = {
+        "bins": [0, 12, 24, 36, 60, 120, 180, 240, 360],
+        "groups": {
+            "group_a": {
+                "n": 42,
+                "curve": [
+                    {"time": 0, "survival": 1.0},
+                    {"time": 120, "survival": 0.75},
+                    {"time": 360, "survival": 0.5},
+                ],
+            }
+        },
+    }
+
+    _km_svg(result, destination, "Overall survival", "Time (months)")
+
+    svg = destination.read_text(encoding="utf-8")
+    assert ">0.00</text>" in svg
+    assert ">0.25</text>" in svg
+    assert ">1.00</text>" in svg
+    assert ">12</text>" in svg
+    assert ">360</text>" in svg
+    assert "Time (months)" in svg
+    assert 'stroke="#303536"' in svg
 
 
 def test_completed_run_creates_privacy_safe_implementation_benchmark_bundle(tmp_path: Path) -> None:

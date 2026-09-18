@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -230,15 +231,57 @@ def _bar_svg(result: dict[str, Any], path: Path, title: str) -> None:
 
 
 def _km_svg(result: dict[str, Any], path: Path, title: str, x_label: str) -> None:
-    maximum_time = max(result["bins"])
-    parts = ['<line x1="70" y1="460" x2="840" y2="460" stroke="#777"/><line x1="70" y1="80" x2="70" y2="460" stroke="#777"/>']
+    bins = [float(value) for value in result["bins"]]
+    minimum_time, maximum_time = min(bins), max(bins)
+    time_span = maximum_time - minimum_time or 1.0
+    left, right, top, bottom = 70.0, 840.0, 80.0, 460.0
+    width, height = right - left, bottom - top
+    parts = []
+
+    # Horizontal survival-probability grid and labels.
+    for survival in (0.0, 0.25, 0.5, 0.75, 1.0):
+        y = bottom - height * survival
+        parts.append(
+            f'<line x1="{left:.0f}" y1="{y:.1f}" x2="{right:.0f}" y2="{y:.1f}" '
+            f'stroke="{("#777" if survival == 0 else "#303536")}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<line x1="{left-6:.0f}" y1="{y:.1f}" x2="{left:.0f}" y2="{y:.1f}" stroke="#8b9292"/>'
+            f'<text x="{left-11:.0f}" y="{y+4:.1f}" text-anchor="end" fill="#b9c0c0" '
+            f'font-family="sans-serif" font-size="12">{survival:.2f}</text>'
+        )
+
+    # Contract-defined time-bin ticks. Keep endpoints and thin only unusually
+    # dense bin lists so labels remain legible in the fixed-width report SVG.
+    stride = max(1, math.ceil((len(bins) - 1) / 8))
+    tick_indices = list(range(0, len(bins), stride))
+    if tick_indices[-1] != len(bins) - 1:
+        tick_indices.append(len(bins) - 1)
+    for index in tick_indices:
+        value = bins[index]
+        x = left + width * (value - minimum_time) / time_span
+        parts.append(
+            f'<line x1="{x:.1f}" y1="{top:.0f}" x2="{x:.1f}" y2="{bottom:.0f}" stroke="#252929"/>'
+            f'<line x1="{x:.1f}" y1="{bottom:.0f}" x2="{x:.1f}" y2="{bottom+6:.0f}" stroke="#8b9292"/>'
+            f'<text x="{x:.1f}" y="{bottom+23:.0f}" text-anchor="middle" fill="#b9c0c0" '
+            f'font-family="sans-serif" font-size="12">{_axis_number(value)}</text>'
+        )
+
+    parts.append(
+        f'<line x1="{left:.0f}" y1="{bottom:.0f}" x2="{right:.0f}" y2="{bottom:.0f}" stroke="#8b9292"/>'
+        f'<line x1="{left:.0f}" y1="{top:.0f}" x2="{left:.0f}" y2="{bottom:.0f}" stroke="#8b9292"/>'
+    )
     for index, (name, group) in enumerate(result["groups"].items()):
         points = []
         for point in group["curve"]:
-            x = 70 + 770 * point["time"] / maximum_time
-            y = 460 - 380 * point["survival"]
+            x = left + width * (float(point["time"]) - minimum_time) / time_span
+            y = bottom - height * float(point["survival"])
             points.append(f"{x:.1f},{y:.1f}")
         parts.append(f'<polyline points="{" ".join(points)}" fill="none" stroke="{COLORS[index % len(COLORS)]}" stroke-width="3"/>')
         parts.append(f'<text x="620" y="{75+index*20}" fill="{COLORS[index % len(COLORS)]}" font-family="sans-serif">{html.escape(name)} (n={group["n"]})</text>')
-    parts.append(f'<text x="380" y="515" fill="#ccc" font-family="sans-serif">{html.escape(x_label)}</text><text x="12" y="270" fill="#ccc" font-family="sans-serif" transform="rotate(-90 12 270)">Survival probability</text>')
+    parts.append(f'<text x="455" y="520" text-anchor="middle" fill="#ccc" font-family="sans-serif">{html.escape(x_label)}</text><text x="16" y="270" text-anchor="middle" fill="#ccc" font-family="sans-serif" transform="rotate(-90 16 270)">Survival probability</text>')
     path.write_text(_svg_frame(title, "".join(parts)), encoding="utf-8")
+
+
+def _axis_number(value: float) -> str:
+    return str(int(value)) if value.is_integer() else f"{value:.2f}".rstrip("0").rstrip(".")
