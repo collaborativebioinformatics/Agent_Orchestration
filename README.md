@@ -2,10 +2,20 @@
 
 ## How to Use
 
-Enter your question. The agent performs best when primed with specific input (the groups you want to compare, the variable, the desired outcome, and sub-questions). Agent Genie will interpret your question, parse the the available biobanks and propose an analysis. The agent will use the metadata to output suitable statistical analyses for review. 
+Agent is a web user that gives the researcher simultaneous access to multiple biobank sites for scientific analysis without required expertise in federated computing. Biobank connection must be authorised to the local server or institution before initial use. A session begins when the user is prompted to select the preferred biobanks for analysis and enter a scientific question in natural language (Figure 1). The description including statistical methods and data stratification is entered to guide the desired output results, plots, and tables. Throughout the session the user can follow a live workflow of the NVIDIA FLARE events between the global server and local sites without viewing access to patient data. The interface displays a review analysis with the scientific question with the cohorts available within privacy limits and feasibility status of each biobank site for data harmonisation. The user is prompted to revise the scientific question with the provided server-agent recommendation. The approved plan is dispatched to the local sites. The session concludes with a study summary including final results and a Report summarizing the federated analysis concluding the search. The user can save the analysis results and prompt the interface with a new study question while maintaining the biobank client connections.
 
-![User Interface](assets/UI_updated.png)
 
+![UI](AgentGenie/docs/demo-preview.png)
+
+Figure 1. Agent web user interface at the start of a session with the live agent workflow.
+
+## How to Build
+Agent Genie is a federated AI system that uses a controller-executor pattern orchestrated by NVIDIA FLARE (Federated Learning Application Runtime Environment) [NVIDIA Corporation] (Figure 2). The global server agent acted as the research controller while each local site server acted as an executor within the biobank environment. A shared schema enables communication between all of the system components so that a response has the same structure. The global agent workflow consists of two phases: the discovery phase and the analysis phase. In the discovery phase, NVIDIA FLARE sends a task to each local site.The return information is collected into a catalogue service for the creation of a federated catalogue that holds shared variables across each biobank site and privacy-protected metadata. A harmoniser maps canonical variable names to the local variables reported from each biobank by the corresponding local site. In the analysis phase, the natural language user prompt is structured into an analytical plan by the global agent. The plan is checked against governance regulations by the policy layer to determine biobank eligibility in the federated search. Each site agent executes the analytical plan received from NVIDIA FLARE in the local environment. The contract contains structured specification parameters including tool, cohort, event, grouping, and time metrics that each site can map to local data columns. After local analysis, aggregated results are returned to the global agent via NVIDIA FLARE to ensure patient-level data stays within its respective biobank.
+
+
+![End-to-end orchestration](assets/biobank-system-design.png)
+
+Fig 2. End-to-end orchestration of Agent by NVIDIA FLARE. The 1) research question is translated by the server agent (NVIDIA FLARE controller) into an 2) analysis contract to be 3) executed by local site agent (NVIDIA FLARE executor) at each biobank. Next 4) aggregated results are returned and pooled for researcher feedback 5) the controller- executor-controller loop is repeated until the plan is approved by the user. 
 
 ## Federated biobank workflow
 
